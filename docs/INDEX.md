@@ -11,6 +11,7 @@ agreed and decisions are recorded.
 | Document | What it covers |
 |---|---|
 | [test-plan.md](test-plan.md) | Every behaviour the library commits to covering and the test covering it. **Start here** — this is where behaviour is agreed |
+| [current-thinking-and-progress.md](current-thinking-and-progress.md) | Handover: where the design has got to, why, what is built, and what the next chunk is |
 | [progress.md](progress.md) | Reverse-chronological milestone log — what exists, with evidence |
 
 ## Integration
