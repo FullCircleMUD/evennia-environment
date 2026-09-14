@@ -47,7 +47,7 @@ rule. This is what keeps the library small, and the pressure to relax it will co
 
 There is no merge algebra. A swamp's movement cost is the number the author wrote — not
 `Multiply(2.0)` against some notional plains. Terrain and weather are not symmetric contributors to
-one key, so nothing needs an order-independent merge, and `Effect` carries no merge kind.
+one key, so nothing needs an order-independent merge, and `EnvironmentEffect` carries no merge kind.
 
 How weather modifies the base is a weather decision, taken when weather is built.
 
@@ -71,29 +71,26 @@ Server process, so a cached value's staleness window is unbounded.
 | Surface | State |
 |---|---|
 | Repo scaffolding, test runner, docs surfaces | Done, committed and pushed |
-| `Effect(key, datatype, default)` | Done — 12 cases, `EF` |
-| `EffectRegistry`, `register()`, `get()` | Done — 8 cases, `ER` |
+| `EnvironmentEffect(key, datatype, default)` | Done — 12 cases, `EF` |
+| `EnvironmentEffectRegistry`, `register()`, `get()` | Done — 8 cases, `ER` |
 | Everything else | Not started |
 
 21 tests passing via `python runtests.py`. The venv is at `venv/`, with Evennia, the library and both
 sibling dependencies installed editable.
 
-**Uncommitted:** everything after the bootstrap commit — `effects.py`, its tests, and the `EF` and
-`ER` sections of the test plan.
-
 ### The rules the built code follows
 
-- `Effect` validates itself in `__post_init__` and raises a `ValueError` there. A malformed
-  declaration is the consumer's code failing at their own line; a traceback pointing there beats a
-  tidy list pointing at us. Boot-time collection is for `check_settings()`, not this.
+- `EnvironmentEffect` validates itself in `__post_init__` and raises a `ValueError` there. A
+  malformed declaration is the consumer's code failing at their own line; a traceback pointing there
+  beats a tidy list pointing at us. Boot-time collection is for `check_settings()`, not this.
 - The default is checked with `isinstance` and nothing more — no coercion, no widening. Declare
   `float`, write `1.0`. `None` is the one exemption, and what it means is the consumer's.
 - A bool default passes an `int` datatype, because `isinstance(True, int)` is `True` in Python. That
   follows from the rule rather than being chosen; `datatype=bool` is how a consumer means a boolean.
 - `register()` refuses a key already declared differently, and passes silently on an identical
   re-registration so a re-imported module is harmless.
-- `get()` returns the `Effect` or `None`. `None` is an ordinary answer: validating a terrain means
-  asking about keys that may not be registered.
+- `get()` returns the `EnvironmentEffect` or `None`. `None` is an ordinary answer: validating a
+  terrain means asking about keys that may not be registered.
 
 ## The next chunk — `check_settings()`
 
@@ -144,7 +141,7 @@ the umbrella reports four, none of them errors:
 
 | Warning | State |
 |---|---|
-| `constant_outside_config` | `EFFECTS` is declared in `effects.py`. The standard wants it in `config.py`, re-exported from `__init__.py`. Undecided — it would create `config.py` a chunk before there is a setting for it |
+| `constant_outside_config` | `ENVIRONMENT_EFFECTS` is declared in `effects.py`. The standard wants it in `config.py`, re-exported from `__init__.py`. Undecided — it would create `config.py` a chunk before there is a setting for it |
 | `interop_missing_sibling` | `fcm-subscriptions` appeared in `libraries/` and needs a section in [interoperability.md](interoperability.md) |
 | `installing_no_steps` | Two steps, wants three. Clears when there is a setting to declare |
-| `log_shim_unused` | Nothing is logged yet. The boot line is what will retire it — `Effect` should not log, since a refusal raises at the consumer's own line and logging before dying is noise |
+| `log_shim_unused` | Nothing is logged yet. The boot line is what will retire it — `EnvironmentEffect` should not log, since a refusal raises at the consumer's own line and logging before dying is noise |

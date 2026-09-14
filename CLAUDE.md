@@ -27,9 +27,12 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**Scaffolded, nothing built.** The repo structure, the test runner and the documentation surfaces
-exist. No behaviour is agreed yet — [docs/test-plan.md](docs/test-plan.md) carries the open decisions
-and no cases. See [docs/progress.md](docs/progress.md).
+**The effects vocabulary is built; terrain and weather are not.** `EnvironmentEffect` and
+`ENVIRONMENT_EFFECTS` — the shape a consumer declares one effect key in, and the list they declare it
+to — are done and tested. Everything else is open:
+[docs/current-thinking-and-progress.md](docs/current-thinking-and-progress.md) is where a session
+picks the work up, and [docs/test-plan.md](docs/test-plan.md) carries the cases and the open
+decisions.
 
 There is no `config.py` and no `apps.py` yet, deliberately. Both exist to check settings, and no
 setting has been agreed. They land with the first one.

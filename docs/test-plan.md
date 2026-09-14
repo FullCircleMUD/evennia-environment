@@ -16,13 +16,14 @@ designed is in [Open decisions](#open-decisions) below.
 | Prefix | Covers |
 |---|---|
 | `SC` | The scaffold — the package installs and the runner runs |
-| `EF` | `Effect` — the shape a consumer declares one effect in |
-| `ER` | `EffectRegistry` — the master list, and registering against it |
+| `EF` | `EnvironmentEffect` — the shape a consumer declares one effect in |
+| `ER` | `EnvironmentEffectRegistry` — the master list, and registering against it |
 
 ## Fixtures
 
-None. The `EF` cases are pure Python — `Effect` takes three values and validates them against each
-other, with no Evennia, no database and no room. The fixtures table grows when a surface needs one.
+None. The `EF` cases are pure Python — `EnvironmentEffect` takes three values and validates them
+against each other, with no Evennia, no database and no room. The fixtures table grows when a surface
+needs one.
 
 ## SC — the scaffold
 
@@ -30,15 +31,15 @@ other, with no Evennia, no database and no room. The fixtures table grows when a
 |---|---|---|
 | SC-01 | The package imports and reports its version | `test_sc_01_package_imports_and_reports_its_version` |
 
-## EF — `Effect(key, datatype, default)`
+## EF — `EnvironmentEffect(key, datatype, default)`
 
 A frozen dataclass, and the only thing a consumer constructs to declare an effect. It carries the
 key's name, the type its values are in, and the value a terrain gets when it declares nothing.
 
 **It validates itself in `__post_init__`, and it raises there rather than collecting.** A malformed
-`Effect(...)` is the consumer's own code failing at their own line, and a traceback pointing at that
-line is worth more than a tidy list pointing at us. Boot-time collection applies to the registry and
-the terrain tables, not to this.
+`EnvironmentEffect(...)` is the consumer's own code failing at their own line, and a traceback
+pointing at that line is worth more than a tidy list pointing at us. Boot-time collection applies to
+the registry and the terrain tables, not to this.
 
 ### Construction
 
@@ -82,30 +83,31 @@ exemption.
 |---|---|---|
 | EF-12 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration. One class for all of them — each one means "you declared this wrong", and one class is easier to catch | `test_ef_12_every_refusal_is_a_value_error_naming_the_key` |
 
-## ER — `EffectRegistry` and `register()`
+## ER — `EnvironmentEffectRegistry` and `register()`
 
 The master list of effects. It lives in library code so the library owns its structure, and a consumer
 adds to it from the module they declare their game in:
 
 ```python
-from evennia_environment import EFFECTS, Effect
+from evennia_environment import ENVIRONMENT_EFFECTS, EnvironmentEffect
 
-EFFECTS.register(Effect("movement_cost", float, 1.0))
+ENVIRONMENT_EFFECTS.register(EnvironmentEffect("movement_cost", float, 1.0))
 ```
 
-**`EFFECTS` is an instance, not a module-level dict.** `EffectRegistry` is a class and `EFFECTS` is
-the one the library exposes, so a test builds its own and no case has to reset shared state between
-runs. ER-10 pins that the container is per-instance rather than a mutable class attribute, which is
-where this design goes wrong if it goes wrong.
+**`ENVIRONMENT_EFFECTS` is an instance, not a module-level dict.** `EnvironmentEffectRegistry` is a
+class and `ENVIRONMENT_EFFECTS` is the one the library exposes, so a test builds its own and no case
+has to reset shared state between runs. ER-10 pins that the container is per-instance rather than a
+mutable class attribute, which is where this design goes wrong if it goes wrong.
 
-**Registration raises immediately**, like `Effect` itself, and for the same reason: the call is in the
-consumer's own module, at a line they wrote. Boot-time collection belongs to `check_settings()`, which
-is a separate piece of work — nothing here knows about settings, imports or Django.
+**Registration raises immediately**, like `EnvironmentEffect` itself, and for the same reason: the
+call is in the consumer's own module, at a line they wrote. Boot-time collection belongs to
+`check_settings()`, which is a separate piece of work — nothing here knows about settings, imports or
+Django.
 
 **The registry holds no values.** A key's datatype and its default are all it carries. The value for a
 room comes from its terrain; the registry supplies the fallback when the terrain declares nothing for
 that key, and the list a terrain's keys are validated against. Both of its jobs are served by
-`get(key)`, which returns the `Effect` or `None`.
+`get(key)`, which returns the `EnvironmentEffect` or `None`.
 
 **`None` is a legitimate answer, not a failure.** Validating a terrain means asking about keys that
 may not be registered — that is the question being asked — so a miss is an ordinary outcome and `get`
@@ -119,7 +121,7 @@ the master list each wait for a caller that wants them.
 | ID | Case | Test function |
 |---|---|---|
 | ER-01 | A registered effect can be looked up by its key, and is the object that was registered | `test_er_01_a_registered_effect_is_returned_by_its_key` |
-| ER-02 | Registering something that is not an `Effect` is refused | `test_er_02_refuses_something_that_is_not_an_effect` |
+| ER-02 | Registering something that is not an `EnvironmentEffect` is refused | `test_er_02_refuses_something_that_is_not_an_effect` |
 | ER-03 | A fresh registry has nothing registered | `test_er_03_a_fresh_registry_has_nothing_registered` |
 | ER-11 | `get()` on a key nobody registered returns `None` | `test_er_11_an_unregistered_key_returns_none` |
 
@@ -131,9 +133,9 @@ re-running their declarations — so it passes and changes nothing.
 
 | ID | Case | Test function |
 |---|---|---|
-| ER-04 | A second, different `Effect` under a key already registered is refused | `test_er_04_refuses_a_different_effect_under_a_taken_key` |
-| ER-05 | Re-registering an identical `Effect` passes, and the key still resolves to that effect | `test_er_05_accepts_an_identical_effect_registered_twice` |
-| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every `Effect` refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
+| ER-04 | A second, different `EnvironmentEffect` under a key already registered is refused | `test_er_04_refuses_a_different_effect_under_a_taken_key` |
+| ER-05 | Re-registering an identical `EnvironmentEffect` passes, and the key still resolves to that effect | `test_er_05_accepts_an_identical_effect_registered_twice` |
+| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every `EnvironmentEffect` refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
 
 ### Isolation
 
@@ -149,11 +151,12 @@ needs cases before it is built.
 - **The consumer declares three things in one module, and one setting names that module.** Their
   terrain types as an `Enum`, their effects registered against the library's master list, and the
   values each terrain gives for the effects it overrides.
-- **`Effect` is the declared shape** — `key`, `datatype`, `default` — and the consumer constructs one
-  per effect. Covered by the `EF` cases above.
+- **`EnvironmentEffect` is the declared shape** — `key`, `datatype`, `default` — and the consumer
+  constructs one per effect. Covered by the `EF` cases above.
 - **The master list lives in library code, not the consumer's.** The consumer calls
-  `EFFECTS.register(Effect(...))`; the library owns the container and its structure. The library
-  imports the consumer's module itself, during `ready()`, so registration happens at a known moment.
+  `ENVIRONMENT_EFFECTS.register(EnvironmentEffect(...))`; the library owns the container and its
+  structure. The library imports the consumer's module itself, during `ready()`, so registration
+  happens at a known moment.
 - **A room stores its terrain as the `Enum` member**, validated in `at_set()`, which also accepts the
   member's string value so YAML-authored world content resolves at the assignment rather than later.
   Evennia's `dbserialize` round-trips an Enum member with identity intact.
