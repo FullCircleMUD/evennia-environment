@@ -21,12 +21,18 @@ designed is in [Open decisions](#open-decisions) below.
 | `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
+| `TP` | `TerrainProperty` — the attribute a room's terrain is held in |
 
 ## Fixtures
 
 None. The `EF`, `EE`, `WT` and `TT` cases are pure Python — each takes its values and validates them
 against each other, with no Evennia, no database and no room. The fixtures table grows when a surface
-needs one. The room mixin is what will need the first one.
+needs one.
+
+The `TP` cases need two: a real Evennia typeclass carrying the property, since `AttributeProperty`
+needs an attribute handler behind it, and two enums — the terrain one and an unrelated one, so TP-04
+has something to be wrong against. Both follow `evennia-equipment`'s shape: typeclasses in
+`tests/game_typeclasses.py`, enums in a module importing nothing but `enum`.
 
 ## SC — the scaffold
 
@@ -289,6 +295,100 @@ to something already in use.
 | TT-01 | A terrain type can be constructed, and is importable from the package | `test_tt_01_a_terrain_type_can_be_constructed` |
 | TT-02 | The instance is frozen — assigning any attribute raises, before there is a field to assign to | `test_tt_02_is_frozen` |
 
+## TP — `TerrainProperty`
+
+The `AttributeProperty` a room's terrain is held in. It is declared with the consumer's terrain enum,
+and validates that what is assigned to it is a member of that enum:
+
+```python
+class Room(DefaultRoom):
+    terrain = TerrainProperty(Terrain)
+```
+
+The enum reaches the property at the declaration, the way `evennia-equipment`'s properties take their
+slots and weights. Nothing here needs a setting, a registry or a declaration module.
+
+**A string goes in the database; a member comes back out.** `at_set()` takes either the member or its
+value and stores the value; `at_get()` resolves the value back to the member. So a consumer reads
+`room.terrain is Terrain.MOUNTAINS`, while what is stored is `"mountains"` — a plain string that
+nothing has to unpickle, that YAML can write, and that a builder command can type.
+
+**That string form is what makes world content work.** `evennia-world-builder` applies attributes
+with `setattr` after `create_object`, so assignment runs through this property — and a YAML file can
+only supply a string. Refusing strings would fail every world-built room.
+
+**`strattr=True`.** The value is held in Evennia's string column, so "every room whose terrain is
+swamp" is a database query rather than a walk. It is decided now because it cannot be added later: a
+value written without the flag is invisible to a property declared with it.
+
+**Terrain is write-once.** A room is given its terrain when it is built and does not change it in
+play. Once a member is stored, a different one is refused; the same one passes and changes nothing,
+so a build applying the same content twice is harmless. `evennia-world-builder` tears down and
+recreates rather than updating in place, so a rebuild assigns each room exactly once.
+
+**`None` is what an unassigned room holds, not a way to clear one.** Evennia's `autocreate` defaults
+to `True`, so the first read of an unset attribute writes the default through `at_set()` — meaning
+the default has to be acceptable. Once a terrain is stored, assigning `None` is refused like any
+other change.
+
+**Two refusals, two exception types, split by who got it wrong.** A bad *assignment* is an
+`AttributeError` — that is the descriptor protocol's own signal, and what `evennia-equipment` raises
+from its `at_set()`. A bad *declaration*, TP-02, is a `ValueError`, like every other declaration in
+this library, because it is a line in the consumer's class body rather than a value arriving at
+runtime.
+
+**The property lives in `room.py` and is not re-exported from the package.** It imports Evennia, and
+`__init__.py` runs while Django is still building its app registry. `evennia-equipment` exports
+nothing from its package for the same reason. A consumer imports
+`from evennia_environment.room import TerrainProperty`.
+
+**`at_set()` fires only on assignment through the property.** `room.db.terrain = "swamp"` writes past
+it unvalidated. That is Evennia's behaviour and cannot be closed from here.
+
+### Declaring the property
+
+| ID | Case | Test function |
+|---|---|---|
+| TP-01 | A property declared with an enum reads as `None` on a room nothing has been assigned to | `test_tp_01_an_unassigned_room_has_no_terrain` |
+| TP-02 | Declaring the property with something that is not an enum class is refused | `test_tp_02_refuses_a_declaration_that_is_not_an_enum` |
+
+### Assignment and storage
+
+| ID | Case | Test function |
+|---|---|---|
+| TP-03 | A member of the declared enum is accepted, and reads back as that same member | `test_tp_03_accepts_a_member_and_reads_it_back` |
+| TP-08 | The member's value as a string is accepted, and reads back as the member — the world-builder path | `test_tp_08_accepts_the_members_value_as_a_string` |
+| TP-10 | What is stored is the plain string, not the member. Read through the attribute handler rather than the property, since the property would resolve it and hide the difference | `test_tp_10_stores_the_plain_string` |
+| TP-11 | `None` is accepted while nothing is stored, which is what an unassigned room holds | `test_tp_11_accepts_none_while_nothing_is_stored` |
+
+### What is refused
+
+| ID | Case | Test function |
+|---|---|---|
+| TP-04 | A member of a different enum is refused — this is the check the enum makes possible | `test_tp_04_refuses_a_member_of_a_different_enum` |
+| TP-09 | A string matching no member's value is refused — `"swmap"` | `test_tp_09_refuses_a_string_matching_no_member` |
+| TP-05 | A value that is neither a member nor a string is refused — a number, an object | `test_tp_05_refuses_a_value_that_is_neither_member_nor_string` |
+
+### Write-once
+
+| ID | Case | Test function |
+|---|---|---|
+| TP-12 | A different terrain assigned over a stored one is refused | `test_tp_12_refuses_a_different_terrain_over_a_stored_one` |
+| TP-13 | The same terrain assigned again passes and changes nothing, so re-applying identical content is harmless | `test_tp_13_accepts_the_same_terrain_assigned_again` |
+| TP-14 | `None` assigned over a stored terrain is refused — a terrain cannot be cleared | `test_tp_14_refuses_none_over_a_stored_terrain` |
+
+### The refusal
+
+| ID | Case | Test function |
+|---|---|---|
+| TP-07 | The refusal names what was assigned, so the mis-set is findable | `test_tp_07_the_refusal_names_what_was_assigned` |
+
+### Retired
+
+| ID | Why |
+|---|---|
+| TP-06 | Was "`None` is refused". Reversed by `autocreate=True` — the default is pushed through `at_set()` on first read, so refusing `None` makes an unassigned room unreadable. TP-11 and TP-14 carry the two halves of what replaced it |
+
 ## Current thinking
 
 Where the design has got to. Everything here is the current working position and open to revision —
@@ -308,9 +408,11 @@ a later idea is not fighting a ruling. Behaviour listed here still needs cases b
   `ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType(...))`; the library owns the container
   and its structure. The library imports the consumer's module itself, during `ready()`, so
   registration happens at a known moment.
-- **A room stores its terrain as the `Enum` member**, validated in `at_set()`, which also accepts the
-  member's string value so YAML-authored world content resolves at the assignment rather than later.
-  Evennia's `dbserialize` round-trips an Enum member with identity intact.
+- **A room stores its terrain as the member's string value, and reads it back as the member.**
+  `at_set()` takes either form and stores the string; `at_get()` resolves it. That is what lets
+  YAML-authored world content assign a terrain, since a YAML file can only supply a string. Held as a
+  `strattr` so it can be queried, and write-once, because a room is given its terrain when it is
+  built and does not change it in play. Covered by the `TP` cases above.
 - **Terrain effect values are absolute, not operations.** A swamp's movement cost is the number the
   author wrote. There is no merge algebra: terrain is the base value and weather modifies it, so the
   two are not symmetric contributors to one key.

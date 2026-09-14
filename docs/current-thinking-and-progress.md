@@ -64,8 +64,10 @@ Server process, so a cached value's staleness window is unbounded.
 - **An `Enum` whose values are effect dicts silently aliases.** Two terrains declaring equal effects
   become one member — `JUNGLE` turns into a second name for `FOREST`. This is why the terrain `Enum`
   holds plain strings and the effects are declared separately.
-- **Evennia's `dbserialize` round-trips an `Enum` member with identity intact.** So a room can store
-  `Terrain.SWAMP` itself rather than a string.
+- **Evennia's `dbserialize` round-trips an `Enum` member with identity intact.** True, and not what
+  the room does: it stores the member's string value and resolves it back on read, so the stored form
+  is queryable and a YAML file can write one. What this finding rules out is a worry, not a design —
+  storing a member would have worked.
 
 ## What is built
 

@@ -8,6 +8,10 @@ function here carries its case ID as its docstring so the trail reads both ways.
 import dataclasses
 from unittest import TestCase
 
+# The TP cases create real objects, so they need a database around them. The
+# rest are pure Python and stay on the lighter base.
+from django.test import TestCase as DjangoTestCase
+
 import evennia_environment
 from evennia_environment import (
     EnvironmentEffect,
@@ -447,3 +451,143 @@ class TerrainTypeTests(TestCase):
         # holds before there is a field to assign to.
         with self.assertRaises(dataclasses.FrozenInstanceError):
             terrain_type.key = "swamp"
+
+
+class TerrainPropertyTests(DjangoTestCase):
+    """TP-01 — TP-14. A room's terrain: enum in, string stored, enum out.
+
+    These need a real object — ``AttributeProperty`` is a descriptor over an
+    attribute handler, and there is nothing to validate without one. The
+    fixtures import Evennia, so they are imported inside each test rather than
+    at module scope.
+    """
+
+    def _room(self):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        return create_object(TerrainRoom, key="room", nohome=True)
+
+    def test_tp_01_an_unassigned_room_has_no_terrain(self):
+        """TP-01"""
+        self.assertIsNone(self._room().terrain)
+
+    def test_tp_02_refuses_a_declaration_that_is_not_an_enum(self):
+        """TP-02"""
+        from evennia_environment.room import TerrainProperty
+
+        for not_an_enum in ("Terrain", 42, object()):
+            with self.subTest(terrain_enum=not_an_enum):
+                with self.assertRaises(ValueError):
+                    TerrainProperty(not_an_enum)
+
+    def test_tp_03_accepts_a_member_and_reads_it_back(self):
+        """TP-03"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+
+        self.assertIs(room.terrain, Terrain.SWAMP)
+
+    def test_tp_08_accepts_the_members_value_as_a_string(self):
+        """TP-08"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        # The world-builder path: a YAML file can only supply a string.
+        room.terrain = "swamp"
+
+        self.assertIs(room.terrain, Terrain.SWAMP)
+
+    def test_tp_10_stores_the_plain_string(self):
+        """TP-10"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+
+        # Read through the handler, not the property: the property would
+        # resolve it back to the member and hide what is actually stored.
+        stored = room.attributes.get("terrain", strattr=True)
+
+        self.assertEqual(stored, "swamp")
+        self.assertNotIsInstance(stored, Terrain)
+
+    def test_tp_11_accepts_none_while_nothing_is_stored(self):
+        """TP-11"""
+        room = self._room()
+        room.terrain = None
+
+        self.assertIsNone(room.terrain)
+
+    def test_tp_04_refuses_a_member_of_a_different_enum(self):
+        """TP-04"""
+        from tests.terrain_enums import Season
+
+        room = self._room()
+
+        with self.assertRaises(AttributeError):
+            room.terrain = Season.WINTER
+
+    def test_tp_09_refuses_a_string_matching_no_member(self):
+        """TP-09"""
+        room = self._room()
+
+        with self.assertRaises(AttributeError):
+            room.terrain = "swmap"
+
+    def test_tp_05_refuses_a_value_that_is_neither_member_nor_string(self):
+        """TP-05"""
+        room = self._room()
+
+        for not_a_terrain in (42, 2.5, object(), ["swamp"]):
+            with self.subTest(value=not_a_terrain):
+                with self.assertRaises(AttributeError):
+                    room.terrain = not_a_terrain
+
+    def test_tp_12_refuses_a_different_terrain_over_a_stored_one(self):
+        """TP-12"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+
+        with self.assertRaises(AttributeError):
+            room.terrain = Terrain.MOUNTAINS
+
+        self.assertIs(room.terrain, Terrain.SWAMP)
+
+    def test_tp_13_accepts_the_same_terrain_assigned_again(self):
+        """TP-13"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+        # Both forms, since re-applied content may arrive as either.
+        room.terrain = Terrain.SWAMP
+        room.terrain = "swamp"
+
+        self.assertIs(room.terrain, Terrain.SWAMP)
+
+    def test_tp_14_refuses_none_over_a_stored_terrain(self):
+        """TP-14"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+
+        with self.assertRaises(AttributeError):
+            room.terrain = None
+
+        self.assertIs(room.terrain, Terrain.SWAMP)
+
+    def test_tp_07_the_refusal_names_what_was_assigned(self):
+        """TP-07"""
+        room = self._room()
+
+        with self.assertRaises(AttributeError) as caught:
+            room.terrain = "swmap"
+
+        self.assertIn("swmap", str(caught.exception))
