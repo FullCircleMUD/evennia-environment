@@ -22,6 +22,14 @@ from evennia_environment.effects import (
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
 )
+from evennia_environment.helpers import (
+    Add,
+    Chain,
+    Constant,
+    Multiply,
+    RoundDown,
+    RoundUp,
+)
 from evennia_environment.terrain import TerrainType
 from evennia_environment.weather import WeatherSlot, WeatherType
 
@@ -29,9 +37,15 @@ __version__ = "0.0.1"
 
 __all__ = [
     "ENVIRONMENT_EFFECT_TYPES",
+    "Add",
+    "Chain",
+    "Constant",
     "EnvironmentEffect",
     "EnvironmentEffectType",
     "EnvironmentEffectTypeRegistry",
+    "Multiply",
+    "RoundDown",
+    "RoundUp",
     "TerrainType",
     "WeatherSlot",
     "WeatherType",

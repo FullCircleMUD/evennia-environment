@@ -14,9 +14,15 @@ from django.test import TestCase as DjangoTestCase
 
 import evennia_environment
 from evennia_environment import (
+    Add,
+    Chain,
+    Constant,
     EnvironmentEffect,
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
+    Multiply,
+    RoundDown,
+    RoundUp,
     TerrainType,
     WeatherSlot,
     WeatherType,
@@ -186,6 +192,129 @@ class EffectTypeRefusalTests(TestCase):
                 # A key that is not a string still has to appear, so the
                 # consumer can find the declaration that is wrong.
                 self.assertIn(str(declaration["key"]), str(caught.exception))
+
+
+class StockHelperConstantTests(TestCase):
+    """SH-01 — SH-02. A fixed answer, whatever came before."""
+
+    def test_sh_01_returns_its_own_value_ignoring_what_came_before(self):
+        """SH-01"""
+        self.assertEqual(Constant(2.0)(99.0), 2.0)
+
+    def test_sh_02_carries_a_value_of_any_type(self):
+        """SH-02"""
+        for answer in ("bare", True, None, ("a", "b")):
+            with self.subTest(value=answer):
+                self.assertEqual(Constant(answer)(1.0), answer)
+
+
+class StockHelperArithmeticTests(TestCase):
+    """SH-03 — SH-06. Scaling and offsetting what was handed in."""
+
+    def test_sh_03_multiply_scales_what_it_was_handed(self):
+        """SH-03"""
+        self.assertEqual(Multiply(1.5)(2.0), 3.0)
+
+    def test_sh_04_multiply_refuses_a_factor_that_is_not_a_number(self):
+        """SH-04"""
+        # True is refused deliberately: isinstance(True, int) is True, so a
+        # plain numeric check would take it and scale by one.
+        for factor in ("1.5", None, True, ("1.5",)):
+            with self.subTest(factor=factor):
+                with self.assertRaises(ValueError):
+                    Multiply(factor)
+
+    def test_sh_05_add_offsets_what_it_was_handed(self):
+        """SH-05"""
+        self.assertEqual(Add(0.5)(2.0), 2.5)
+
+    def test_sh_06_add_refuses_an_amount_that_is_not_a_number(self):
+        """SH-06"""
+        for amount in ("0.5", None, True, ("0.5",)):
+            with self.subTest(amount=amount):
+                with self.assertRaises(ValueError):
+                    Add(amount)
+
+
+class StockHelperRoundingTests(TestCase):
+    """SH-07 — SH-08. Landing back on a whole number."""
+
+    def test_sh_07_round_up_goes_up_and_returns_an_int(self):
+        """SH-07"""
+        self.assertEqual(RoundUp()(2.1), 3)
+        self.assertIsInstance(RoundUp()(2.1), int)
+        self.assertEqual(RoundUp()(3.0), 3)
+        # Up from a negative means toward zero.
+        self.assertEqual(RoundUp()(-1.5), -1)
+
+    def test_sh_08_round_down_goes_down_and_returns_an_int(self):
+        """SH-08"""
+        self.assertEqual(RoundDown()(2.9), 2)
+        self.assertIsInstance(RoundDown()(2.9), int)
+        self.assertEqual(RoundDown()(3.0), 3)
+        # Down from a negative means away from zero.
+        self.assertEqual(RoundDown()(-1.5), -2)
+
+
+class StockHelperChainTests(TestCase):
+    """SH-09 — SH-12. Composing helpers in order."""
+
+    def test_sh_09_runs_its_helpers_left_to_right(self):
+        """SH-09"""
+        # 2.0 -> x1.5 -> 3.0 -> +0.6 -> 3.6 -> up -> 4
+        self.assertEqual(Chain(Multiply(1.5), Add(0.6), RoundUp())(2.0), 4)
+
+        # Order is proved by reversing it: up first gives 2 -> 3.0 -> 3.6.
+        self.assertEqual(Chain(RoundUp(), Multiply(1.5), Add(0.6))(2.0), 3.6)
+
+    def test_sh_10_passes_the_kwargs_to_every_member(self):
+        """SH-10"""
+        seen = []
+
+        def _watching(value, **kwargs):
+            seen.append(kwargs)
+            return value
+
+        Chain(_watching, _watching)(1.0, actor="someone", door="a door")
+
+        self.assertEqual(
+            seen, [{"actor": "someone", "door": "a door"}] * 2
+        )
+
+    def test_sh_11_refuses_a_member_that_is_not_a_helper(self):
+        """SH-11"""
+        for not_a_helper in (2.5, None, lambda: 2.5, lambda value: 2.5):
+            with self.subTest(member=not_a_helper):
+                with self.assertRaises(ValueError):
+                    Chain(Multiply(1.5), not_a_helper)
+
+    def test_sh_12_an_empty_chain_returns_what_it_was_handed(self):
+        """SH-12"""
+        self.assertEqual(Chain()(2.5), 2.5)
+
+
+class StockHelperContractTests(TestCase):
+    """SH-13. Every stock helper is usable where a helper is required."""
+
+    def test_sh_13_every_stock_helper_satisfies_the_helper_contract(self):
+        """SH-13"""
+        # They are classes with __call__, and the declaration check reads a
+        # signature — so this pins that a bound __call__ satisfies it.
+        helpers = (
+            Constant(1.0),
+            Multiply(1.5),
+            Add(0.5),
+            RoundUp(),
+            RoundDown(),
+            Chain(Multiply(1.5)),
+        )
+
+        for helper in helpers:
+            with self.subTest(helper=helper):
+                effect_type = EnvironmentEffectType(
+                    key="movement_cost", return_type=float, default=helper
+                )
+                EnvironmentEffect(effect_type, helper)
 
 
 MOVEMENT_COST = EnvironmentEffectType(

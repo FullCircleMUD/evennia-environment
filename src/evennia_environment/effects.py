@@ -28,8 +28,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 
-def _rejects_helper_arguments(helper):
+def rejects_helper_arguments(helper):
     """Return why ``helper`` cannot be called as one, or ``None``.
+
+    Shared rather than private: an effect type checks its default with it, an
+    effect checks its helper, and a Chain checks each member. One rule, one
+    implementation, three call sites across two modules.
 
     Every contribution is called as ``helper(value, **kwargs)`` — the running
     value positionally, and whatever the call site passed by name. Both halves
@@ -126,7 +130,7 @@ class EnvironmentEffectType:
                 f"the type itself — float, not \"float\"."
             )
 
-        refusal = _rejects_helper_arguments(self.default)
+        refusal = rejects_helper_arguments(self.default)
         if refusal:
             raise ValueError(
                 f"EnvironmentEffectType {self.key!r} declares a default that "
@@ -244,7 +248,7 @@ class EnvironmentEffect:
         # would crash at the first call is refused at the line declaring it.
         # Nothing here looks at what it returns: return_type is checked against
         # an answer on the call path, where it covers every contribution.
-        refusal = _rejects_helper_arguments(self.helper)
+        refusal = rejects_helper_arguments(self.helper)
         if refusal:
             raise ValueError(
                 f"EnvironmentEffect for {self.effect_type.key!r} declares a "

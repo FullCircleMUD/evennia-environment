@@ -19,6 +19,7 @@ designed is in [Open decisions](#open-decisions) below.
 | `EF` | `EnvironmentEffectType` — the shape a consumer declares one effect type in |
 | `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
 | `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
+| `SH` | The stock helpers — `Constant`, `Multiply`, `Add`, `RoundUp`, `RoundDown`, `Chain` |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
 | `WS` | `WeatherSlot` — one of a terrain's ten slots, day and night |
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
@@ -232,6 +233,68 @@ call path, where it applies to every contribution rather than only to the one de
 |---|---|
 | EE-04 — EE-06 | All three checked a magnitude against the type's datatype. There is no magnitude now — a contribution is a helper, and what it returns is checked where it is called |
 | EE-07 | Was "a `None` magnitude is refused". Absorbed into EE-09: `None` is not callable, so it fails the helper check like anything else that cannot answer |
+
+## SH — the stock helpers
+
+Helpers a consumer will otherwise write for themselves, shipped so they do not have to. They are
+tools, not a vocabulary: a consumer uses them, ignores them, or mixes them with their own functions,
+and nothing here restricts what an effect may do.
+
+```python
+EnvironmentEffect(MOVE_COST, Constant(2.0))
+EnvironmentEffect(MOVE_COST, Chain(Multiply(1.5), RoundUp()))
+```
+
+**Every one satisfies the helper contract** — `f(value, **kwargs) -> value` — so they go anywhere a
+helper goes, including as a type's `default`. They are classes rather than closures so they carry a
+readable `repr`, compare equal to their like, and validate their arguments at construction.
+
+**They ignore `kwargs` and must still accept them**, because a call site passes the same kwargs to
+every helper in the chain and one of them may want an actor the others do not.
+
+**Not shipped:** subtract and divide, which are `Add` and `Multiply` with the number written
+differently, and clamp, which nothing has asked for yet.
+
+### Constant
+
+| ID | Case | Test function |
+|---|---|---|
+| SH-01 | Returns its own value, ignoring what it was handed — this is what makes a declaration an override | `test_sh_01_returns_its_own_value_ignoring_what_came_before` |
+| SH-02 | Carries a value of any type, not only numbers, so a key returning an enum member or a string can use it | `test_sh_02_carries_a_value_of_any_type` |
+
+### Multiply and Add
+
+| ID | Case | Test function |
+|---|---|---|
+| SH-03 | `Multiply` scales what it was handed | `test_sh_03_multiply_scales_what_it_was_handed` |
+| SH-04 | `Multiply` refuses a factor that is not a number, at construction. A `bool` is refused too — `isinstance(True, int)` is `True`, so a plain numeric check would take it and scale by one | `test_sh_04_multiply_refuses_a_factor_that_is_not_a_number` |
+| SH-05 | `Add` offsets what it was handed | `test_sh_05_add_offsets_what_it_was_handed` |
+| SH-06 | `Add` refuses an amount that is not a number, on the same terms | `test_sh_06_add_refuses_an_amount_that_is_not_a_number` |
+
+### RoundUp and RoundDown
+
+An `int` effect type and a `Multiply` produce a float, which the return type refuses. These are how a
+consumer lands back on a whole number.
+
+| ID | Case | Test function |
+|---|---|---|
+| SH-07 | `RoundUp` returns an `int`, and goes up — including for a negative, where up means toward zero | `test_sh_07_round_up_goes_up_and_returns_an_int` |
+| SH-08 | `RoundDown` returns an `int`, and goes down — including for a negative, where down means away from zero | `test_sh_08_round_down_goes_down_and_returns_an_int` |
+
+### Chain
+
+| ID | Case | Test function |
+|---|---|---|
+| SH-09 | Runs its helpers left to right, each handed what the one before it returned | `test_sh_09_runs_its_helpers_left_to_right` |
+| SH-10 | Passes the caller's kwargs to every member, so a chain of three sees what one of them needs | `test_sh_10_passes_the_kwargs_to_every_member` |
+| SH-11 | Refuses a member that cannot be called as a helper, at construction rather than part-way through a call | `test_sh_11_refuses_a_member_that_is_not_a_helper` |
+| SH-12 | An empty chain returns what it was handed. It is the written form of "nothing happens here" | `test_sh_12_an_empty_chain_returns_what_it_was_handed` |
+
+### The contract
+
+| ID | Case | Test function |
+|---|---|---|
+| SH-13 | Every stock helper is accepted where a helper is required. They are classes with `__call__`, and the declaration check reads a signature — this pins that a bound `__call__` satisfies it, rather than assuming | `test_sh_13_every_stock_helper_satisfies_the_helper_contract` |
 
 ## WT — `WeatherType(key, effects, description, transition_in)`
 
