@@ -20,12 +20,13 @@ designed is in [Open decisions](#open-decisions) below.
 | `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
 | `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
+| `TT` | `TerrainType` — the shape a consumer declares one terrain in |
 
 ## Fixtures
 
-None. The `EF`, `EE` and `WT` cases are pure Python — each takes its values and validates them against
-each other, with no Evennia, no database and no room. The fixtures table grows when a surface needs
-one.
+None. The `EF`, `EE`, `WT` and `TT` cases are pure Python — each takes its values and validates them
+against each other, with no Evennia, no database and no room. The fixtures table grows when a surface
+needs one. The room mixin is what will need the first one.
 
 ## SC — the scaffold
 
@@ -268,6 +269,25 @@ shape, not what is in it.
 | ID | Case | Test function |
 |---|---|---|
 | WT-10 | Every refusal is a `ValueError` naming the key, as every `EnvironmentEffectType` refusal is | `test_wt_10_every_refusal_is_a_value_error_naming_the_key` |
+
+## TT — `TerrainType`
+
+**A placeholder, deliberately.** It carries no fields yet. It exists so the room mixin can hold a
+real class from the start and validate against it, rather than accepting a string now and being
+retrofitted later when the fields are agreed.
+
+What it will carry is in [Current thinking](#current-thinking) — the terrain's own environment
+effects, always in force, and its ten numbered weather slots. None of that is designed, and no case
+below anticipates it. Cases land here as each field is agreed, the same as everywhere else.
+
+It is a frozen dataclass like the other declaration classes, decided now rather than later: adding a
+field to a frozen class is nothing, while discovering a mutable one after rooms hold it is a change
+to something already in use.
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-01 | A terrain type can be constructed, and is importable from the package | `test_tt_01_a_terrain_type_can_be_constructed` |
+| TT-02 | The instance is frozen — assigning any attribute raises, before there is a field to assign to | `test_tt_02_is_frozen` |
 
 ## Current thinking
 

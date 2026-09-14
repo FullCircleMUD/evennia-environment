@@ -22,6 +22,7 @@ from evennia_environment.effects import (
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
 )
+from evennia_environment.terrain import TerrainType
 from evennia_environment.weather import WeatherType
 
 __version__ = "0.0.1"
@@ -31,5 +32,6 @@ __all__ = [
     "EnvironmentEffect",
     "EnvironmentEffectType",
     "EnvironmentEffectTypeRegistry",
+    "TerrainType",
     "WeatherType",
 ]

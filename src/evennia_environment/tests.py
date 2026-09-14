@@ -13,6 +13,7 @@ from evennia_environment import (
     EnvironmentEffect,
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
+    TerrainType,
     WeatherType,
 )
 
@@ -425,3 +426,24 @@ class WeatherTypeRefusalTests(TestCase):
                 # A key that is not a string still has to appear, so the
                 # consumer can find the declaration that is wrong.
                 self.assertIn(str(declaration["key"]), str(caught.exception))
+
+
+class TerrainTypeTests(TestCase):
+    """TT-01 — TT-02. The placeholder the room mixin will validate against.
+
+    It has no fields yet. These two cases exist so the class is real and frozen
+    before anything holds one; the rest land as fields are agreed.
+    """
+
+    def test_tt_01_a_terrain_type_can_be_constructed(self):
+        """TT-01"""
+        self.assertIsInstance(TerrainType(), TerrainType)
+
+    def test_tt_02_is_frozen(self):
+        """TT-02"""
+        terrain_type = TerrainType()
+
+        # Frozen blocks every attribute, not only declared fields, so this
+        # holds before there is a field to assign to.
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            terrain_type.key = "swamp"
