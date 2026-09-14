@@ -3,46 +3,49 @@
 
 A weather is one entry in a game's spectrum — sunny with some clouds, heavy
 rain, blizzard — declared once and referenced from any terrain that can have
-it. It carries the effects it contributes while it is active, and two optional
-strings the consumer may render.
+it. It carries the effects it declares, and two optional strings the consumer
+may render.
+
+**Declaring nothing is normal.** A weather only declares the keys it wants
+different from the default; silence leaves the default's answer standing, so
+the mild end of a spectrum is an empty declaration rather than a list of
+no-ops.
 
 The library never renders either string, never decides when they are shown and
 never compares them. What a weather's values mean, and when its text appears,
 are the consumer's.
 
-``WeatherType`` validates itself on construction and raises there rather than
-collecting, as ``EnvironmentEffectType`` does: the declaration is a line in the
-consumer's own module, and the traceback should point at it.
-
-**It does not check its effect keys against the master list.** A weather may be
-declared before the effects it names are registered — both happen in the
-consumer's module, in whatever order they wrote them — so refusing here would
-reject a declaration that is correct by the time the game boots. That check
-belongs with boot validation.
-
 See docs/test-plan.md § WT.
 """
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Optional
+
+from evennia_environment.effects import one_effect_per_type
 
 
 @dataclass(frozen=True)
 class WeatherType:
-    """One weather a consumer's game can have. See docs/test-plan.md § WT."""
+    """One weather a consumer's game can have. See docs/test-plan.md § WT.
+
+    ``effects`` is a tuple of ``EnvironmentEffect`` rather than a mapping: each
+    entry carries its own type, so the key lives in one place and cannot
+    disagree with what is filed under it. Held as a tuple whatever was passed,
+    because effects resolve at read time and a mutable collection here would
+    change every room using this weather.
+    """
 
     key: str
-    effects: Mapping[str, Any]
+    effects: tuple = ()
     description: Optional[str] = None
     transition_in: Optional[str] = None
 
     def __post_init__(self):
         """Refuse a declaration that cannot be used, naming the key.
 
-        Every refusal is a ``ValueError``, as ``EnvironmentEffectType``'s are: each
-        one means the same thing to a consumer — you declared this wrong — and
-        one class is easier to catch than a type per mistake.
+        Every refusal is a ``ValueError``, as the effect types' are: each one
+        means the same thing to a consumer — you declared this wrong — and one
+        class is easier to catch than a type per mistake.
         """
         if not isinstance(self.key, str):
             raise ValueError(
@@ -60,17 +63,11 @@ class WeatherType:
                 "nothing and no terrain slot can hold it."
             )
 
-        # A Mapping rather than a dict, so anything that reads like one will
-        # do. A list of pairs will not: it can carry the same effect key twice,
-        # and one of the two would be silently ignored.
-        if not isinstance(self.effects, Mapping):
-            raise ValueError(
-                f"Weather {self.key!r} declares effects as a "
-                f"{type(self.effects).__name__}, which is not a mapping. Pass "
-                f"effect key to value — an empty mapping if the weather "
-                f"contributes nothing, which is an ordinary weather rather "
-                f"than a mistake."
-            )
+        object.__setattr__(
+            self,
+            "effects",
+            one_effect_per_type(self.effects, f"Weather {self.key!r}"),
+        )
 
         # The strings are opaque and optional: all that is checked is that
         # there is text to render, or None saying there is not.

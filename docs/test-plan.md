@@ -40,21 +40,30 @@ has something to be wrong against. Both follow `evennia-equipment`'s shape: type
 |---|---|---|
 | SC-01 | The package imports and reports its version | `test_sc_01_package_imports_and_reports_its_version` |
 
-## EF — `EnvironmentEffectType(key, datatype, default)`
+## EF — `EnvironmentEffectType(key, return_type, default, requires)`
 
 A frozen dataclass, and the only thing a consumer constructs to declare an effect type. It carries the
-key's name, the type its values are in, and the value a terrain gets when it declares nothing.
+key's name, the type a helper must hand back, the helper that answers when nothing else does, and the
+kwargs a call site has to supply.
 
 **It validates itself in `__post_init__`, and it raises there rather than collecting.** A malformed
 `EnvironmentEffectType(...)` is the consumer's own code failing at their own line, and a traceback
 pointing at that line is worth more than a tidy list pointing at us. Boot-time collection applies to
 the registry and the terrain tables, not to this.
 
+**`return_type` describes what comes back from a helper, not what is declared here.** So it is checked
+against an answer at the call, and all that can be checked at the declaration is that it is a usable
+type.
+
+**The default is a helper, like every other contribution.** A type whose sensible default is a
+calculation — natural light, which is terrain and the hour together — would otherwise repeat that
+calculation on every terrain that wanted it. `Constant(1.0)` is the static case.
+
 ### Construction
 
 | ID | Case | Test function |
 |---|---|---|
-| EF-01 | A valid effect type carries its key, datatype and default unchanged | `test_ef_01_carries_its_key_datatype_and_default` |
+| EF-01 | A valid effect type carries its key, return type, default and requires unchanged | `test_ef_01_carries_its_key_return_type_default_and_requires` |
 | EF-02 | The instance is frozen — assigning to a field after construction raises | `test_ef_02_is_frozen` |
 
 ### The key
@@ -64,33 +73,40 @@ the registry and the terrain tables, not to this.
 | EF-03 | A key that is not a string is refused | `test_ef_03_refuses_a_key_that_is_not_a_string` |
 | EF-04 | An empty key is refused — without a key the effect type names nothing | `test_ef_04_refuses_an_empty_key` |
 
-### The datatype
+### The return type
 
 | ID | Case | Test function |
 |---|---|---|
-| EF-05 | A datatype that is not a type object is refused — `"float"` names a type and is a string | `test_ef_05_refuses_a_datatype_that_is_not_a_type` |
+| EF-05 | A return type that is not a type object is refused — `"float"` names a type and is a string | `test_ef_05_refuses_a_return_type_that_is_not_a_type` |
+| EF-13 | `typing.Any` is refused by name, and the refusal points at `object`. `isinstance(Any, type)` is `True`, so it passes the check above and then raises `TypeError` at the first answer — it would boot clean and crash in play | `test_ef_13_refuses_typing_any` |
+| EF-14 | `object` is accepted, and is how a consumer declares that any answer will do. `isinstance(x, object)` is always `True`, so it needs no special case | `test_ef_14_accepts_object_as_the_anything_declaration` |
 
-### The default, against the datatype
-
-**The check is `isinstance(default, datatype)` and nothing more.** The declared datatype is taken at
-its word and the default has to be of it — no coercion, no widening. An author who declares `float`
-writes `1.0`, not `1`, and the refusal says so at the line that got it wrong. `None` is the one
-exemption.
+### The default helper
 
 | ID | Case | Test function |
 |---|---|---|
-| EF-06 | A default matching its datatype is accepted and stored unchanged | `test_ef_06_accepts_a_default_of_the_declared_type` |
-| EF-07 | A default of an unrelated type is refused — `default="fast"` for a `float` | `test_ef_07_refuses_a_default_of_an_unrelated_type` |
-| EF-08 | An int default for a `float` datatype is refused, not widened | `test_ef_08_refuses_an_int_default_for_a_float_datatype` |
-| EF-09 | A float default for an `int` datatype is refused, not truncated | `test_ef_09_refuses_a_float_default_for_an_int_datatype` |
-| EF-10 | A bool default for an `int` datatype is accepted. This is not a separate ruling — `isinstance(True, int)` is `True` in Python, so it follows from the rule above. Declaring `datatype=bool` is how a consumer means a boolean | `test_ef_10_accepts_a_bool_default_for_an_int_datatype` |
-| EF-11 | A `None` default is accepted whatever the datatype, and exempt from the check. What `None` means is the consumer's, decided in the code that reads the value | `test_ef_11_accepts_a_none_default_whatever_the_datatype` |
+| EF-15 | A default that is not callable is refused — `1.0` names an answer but cannot be called for one | `test_ef_15_refuses_a_default_that_is_not_callable` |
+| EF-16 | A default that cannot take the running value is refused — `lambda: 2.0` accepts nothing | `test_ef_16_refuses_a_default_that_cannot_take_the_running_value` |
+| EF-17 | A default that cannot take the caller's kwargs is refused — `lambda value: 2.0` has nowhere to put them | `test_ef_17_refuses_a_default_that_cannot_take_the_kwargs` |
+
+### What a call site must supply
+
+| ID | Case | Test function |
+|---|---|---|
+| EF-18 | `requires` defaults to empty — a key needing nothing from the caller declares nothing | `test_ef_18_requires_defaults_to_empty` |
+| EF-19 | A `requires` that is not a collection of strings is refused — these are kwarg names | `test_ef_19_refuses_a_requires_that_is_not_names` |
 
 ### The refusal
 
 | ID | Case | Test function |
 |---|---|---|
 | EF-12 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration. One class for all of them — each one means "you declared this wrong", and one class is easier to catch | `test_ef_12_every_refusal_is_a_value_error_naming_the_key` |
+
+### Retired
+
+| ID | Why |
+|---|---|
+| EF-06 — EF-11 | All six checked a default *value* against the declared datatype. The default is a helper now, so there is no value at the declaration to check. The type check they were doing moves to the call path, where it applies to every answer rather than only to the default |
 
 ## ER — `EnvironmentEffectTypeRegistry` and `register()`
 
@@ -137,15 +153,23 @@ the master list each wait for a caller that wants them.
 
 ### The duplicate-key rule
 
-An effect type declared twice means one of the two declarations is being silently ignored, which
-is worth refusing. Declaring the *same* effect type twice is harmless — a module imported again,
-a consumer re-running their declarations — so it passes and changes nothing.
+**The key is the identity.** Two declarations under one key are the same effect type as far as the
+library can tell, and one of them is being ignored — so the second is refused, whatever it holds.
+
+Comparing the declarations instead is no longer possible. A default is a helper, and two
+separately-written declarations hold different function objects even when they read identically, so
+"is this the same declaration" has no answer the library can trust.
 
 | ID | Case | Test function |
 |---|---|---|
-| ER-04 | A second, different `EnvironmentEffectType` under a key already registered is refused | `test_er_04_refuses_a_different_effect_type_under_a_taken_key` |
-| ER-05 | Re-registering an identical `EnvironmentEffectType` passes, and the key still resolves to that effect type | `test_er_05_accepts_an_identical_effect_type_registered_twice` |
-| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every `EnvironmentEffectType` refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
+| ER-04 | A second effect type under a key already registered is refused, whatever it declares | `test_er_04_refuses_a_second_effect_type_under_a_taken_key` |
+| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every declaration refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
+
+### Retired
+
+| ID | Why |
+|---|---|
+| ER-05 | Was "re-registering an identical effect type passes". Two separately-built declarations can no longer be identical — their helpers are different function objects — so the case tested something that cannot happen. ER-04 now covers every second registration |
 
 ### Isolation
 
@@ -153,55 +177,47 @@ a consumer re-running their declarations — so it passes and changes nothing.
 |---|---|---|
 | ER-10 | Two registries do not share state — registering in one leaves the other empty | `test_er_10_two_registries_do_not_share_state` |
 
-## EE — `EnvironmentEffect(effect_type, magnitude)`
+## EE — `EnvironmentEffect(effect_type, helper)`
 
-A frozen dataclass pairing a declared effect type with the value something gives for it. This is what
-terrain and weather actually carry: `EnvironmentEffectType` says `movement_cost` is a float
-defaulting to 1.0, and an `EnvironmentEffect` says this swamp, or this blizzard, makes it 2.5.
+A frozen dataclass pairing a declared effect type with the helper that answers for it. This is what
+terrain and weather carry: `EnvironmentEffectType` says `move_cost` is a float defaulting to
+`Constant(1.0)`, and an `EnvironmentEffect` says what this swamp, or this blizzard, does about it.
 
 ```python
-EnvironmentEffect(MOVEMENT_COST, 2.5)
+EnvironmentEffect(MOVE_COST, Constant(2.0))
 ```
 
-**The magnitude is checked against the type's own datatype** — the same `isinstance` rule, at the
-same strictness the type applies to its default. No coercion, no widening, and a bool passing an
-`int` datatype follows from the rule here exactly as it does in EF-10. The check reads the datatype
-off the type it was handed, so nothing that *holds* these objects does any checking: not
-`WeatherType`, not terrain.
+**Declared means changed.** A terrain or weather only declares the keys it wants to be different from
+the default. Silence is not an omission to be filled in — nothing runs, and the default's answer
+stands.
 
-**The check lives here rather than as a method on the type.** Terrain and weather both hold
-`EnvironmentEffect` objects, so there is one call site, and a `validate()` on the type would be
-indirection waiting for a second caller that does not exist.
+**The helper is checked the same way the type's default is** — callable, takes the running value
+positionally, takes `**kwargs`. Both go through one check, so a helper that would crash at the first
+call is refused at the line that declared it.
 
-**A `None` magnitude is refused, and that is not EF-11 being contradicted.** A type may default to
-`None` because "no default" is a real state. "No magnitude" is not one: something that does not touch
-visibility leaves visibility out of its collection, so omission already says it. A second way to say
-nothing would have to be handled everywhere a value is read.
+**Nothing here looks at what the helper returns.** `return_type` is checked against an answer on the
+call path, where it applies to every contribution rather than only to the one declared here.
 
-**It carries no key of its own.** The key belongs to the type and is reached through it. An accessor
-that saves the hop waits for a caller that wants one.
+**It carries no key of its own.** The key belongs to the type and is reached through it.
 
 ### Construction
 
 | ID | Case | Test function |
 |---|---|---|
-| EE-01 | A valid effect carries its type and magnitude unchanged, and the type is the object that was passed | `test_ee_01_carries_its_type_and_magnitude` |
+| EE-01 | A valid effect carries its type and helper unchanged, and the type is the object that was passed | `test_ee_01_carries_its_type_and_helper` |
 | EE-02 | The instance is frozen — assigning to a field after construction raises | `test_ee_02_is_frozen` |
 
 ### The effect type
 
 | ID | Case | Test function |
 |---|---|---|
-| EE-03 | An effect type that is not an `EnvironmentEffectType` is refused — `"movement_cost"` names one and is a string | `test_ee_03_refuses_a_type_that_is_not_an_effect_type` |
+| EE-03 | An effect type that is not an `EnvironmentEffectType` is refused — `"move_cost"` names one and is a string | `test_ee_03_refuses_a_type_that_is_not_an_effect_type` |
 
-### The magnitude, against the type's datatype
+### The helper
 
 | ID | Case | Test function |
 |---|---|---|
-| EE-04 | A magnitude of the type's declared datatype is accepted and stored unchanged | `test_ee_04_accepts_a_magnitude_of_the_declared_datatype` |
-| EE-05 | A magnitude of an unrelated type is refused — `2.5` against a `str` effect type | `test_ee_05_refuses_a_magnitude_of_an_unrelated_type` |
-| EE-06 | An int magnitude for a `float` effect type is refused, not widened. This is the rule most likely to be relaxed into a kindness later, so it is pinned | `test_ee_06_refuses_an_int_magnitude_for_a_float_type` |
-| EE-07 | A `None` magnitude is refused, whatever the datatype | `test_ee_07_refuses_a_none_magnitude` |
+| EE-09 | A helper that cannot be called as one is refused — not callable at all, or callable but unable to take the running value or the caller's kwargs. The rule itself is pinned by EF-15 to EF-17 against the default; this proves the same check is applied here | `test_ee_09_refuses_a_helper_that_cannot_be_called_as_one` |
 
 ### The refusal
 
@@ -209,26 +225,50 @@ that saves the hop waits for a caller that wants one.
 |---|---|---|
 | EE-08 | Every refusal is a `ValueError`. Where the type is a real `EnvironmentEffectType` the message names its key, so the consumer can find the declaration; where it is not, it names what was passed instead | `test_ee_08_every_refusal_is_a_value_error_naming_the_key` |
 
+### Retired
+
+| ID | Why |
+|---|---|
+| EE-04 — EE-06 | All three checked a magnitude against the type's datatype. There is no magnitude now — a contribution is a helper, and what it returns is checked where it is called |
+| EE-07 | Was "a `None` magnitude is refused". Absorbed into EE-09: `None` is not callable, so it fails the helper check like anything else that cannot answer |
+
 ## WT — `WeatherType(key, effects, description, transition_in)`
 
 A frozen dataclass, and the only thing a consumer constructs to declare one weather. It carries the
-name the library looks it up by, what the weather contributes while it is active, and two optional
-strings the consumer may render.
+name the library looks it up by, the effects it declares, and two optional strings the consumer may
+render.
 
-**It validates itself in `__post_init__` and raises there**, as `EnvironmentEffectType` does and
-for the same reason: the declaration is a line in the consumer's own module, and the traceback
-should point at it.
+```python
+WeatherType(
+    key="blizzard",
+    effects=(
+        EnvironmentEffect(MOVE_COST, Multiply(1.5)),
+        EnvironmentEffect(VISIBILITY, Constant(0.2)),
+    ),
+    description="Snow drives across the ridge in sheets.",
+)
 
-**Nothing constrains the key beyond being a non-empty string.** Spaces and punctuation are legal, as
-they are for an effect key — the rule is the same on both, and a key with a space breaks nothing,
-since it is a mapping handle. A player never sees it; they see `description` and `transition_in`.
-Whether builder-facing surfaces make a spaced key awkward to type is a question for those surfaces
-when they exist.
+WeatherType(key="sunny_with_some_clouds")   # declares nothing, changes nothing
+```
 
-**It does not check its effect keys against the master list.** A weather may be declared before the
-effects it names are registered — both happen in the consumer's own module, in whatever order they
-wrote them — so refusing here would reject a declaration that is correct by the time the game boots.
-That check belongs with boot validation, alongside the terrain tables.
+**`effects` is a tuple of `EnvironmentEffect`, not a mapping.** Each entry carries its own type, so
+the key lives in one place and a mapping's key cannot disagree with the entry filed under it. Stored
+as a tuple whatever was passed, so a frozen weather is frozen in fact — a mutable collection here
+would change every room using that weather, since effects resolve at read time.
+
+**At most one effect per effect type.** A second entry for a type already declared is refused, naming
+the key, identical or not. This is what guarantees the resolution chain is never longer than two, so
+there is no ordering to configure and no merge rule to write.
+
+**Declaring nothing is normal.** The mild end of a spectrum contributes nothing, and silence leaves
+the default's answer standing. `effects` defaults to empty.
+
+**An unregistered effect key is unrepresentable.** An `EnvironmentEffect` holds the type object
+itself, so there is no way to name a key nobody declared — the check the earlier shape could not do
+is now a thing that cannot be written.
+
+**A query runs at most one of them.** The call names a key, so only the entry whose type matches is
+consulted. A weather declaring five effects does not run five helpers.
 
 **The two strings are opaque.** The library stores them and hands them back; it never renders them,
 never decides when they are shown and never compares them. `description` is the weather line a
@@ -236,16 +276,15 @@ consumer puts under a room description. `transition_in` is what they render when
 active — one per weather rather than a message per from-to pair, because an incoming message reads
 correctly from any predecessor, and N strings beat N².
 
-**The values inside `effects` are not covered here.** Whether a weather's value for a key overrides
-terrain's or modifies it is open — see [Open decisions](#open-decisions) — and the answer decides
-whether a value is a plain number or an operation. The cases below cover the mapping's presence and
-shape, not what is in it.
+**Nothing constrains the key beyond being a non-empty string.** Spaces and punctuation are legal, as
+they are for an effect key — the key is a mapping handle, and a player sees `description` and
+`transition_in`.
 
 ### Construction
 
 | ID | Case | Test function |
 |---|---|---|
-| WT-01 | A valid weather type carries its key, effects, description and transition_in unchanged | `test_wt_01_carries_its_key_effects_and_both_strings` |
+| WT-01 | A valid weather type carries its key, effects and both strings unchanged | `test_wt_01_carries_its_key_effects_and_both_strings` |
 | WT-02 | The instance is frozen — assigning to a field after construction raises | `test_wt_02_is_frozen` |
 
 ### The key
@@ -255,12 +294,14 @@ shape, not what is in it.
 | WT-03 | A key that is not a string is refused | `test_wt_03_refuses_a_key_that_is_not_a_string` |
 | WT-04 | An empty key is refused — without a key the weather names nothing and no slot can hold it | `test_wt_04_refuses_an_empty_key` |
 
-### The effects mapping
+### The effects
 
 | ID | Case | Test function |
 |---|---|---|
-| WT-05 | A weather declaring an empty effects mapping is accepted — the mild end of a spectrum contributes nothing, and that is an ordinary weather rather than a mistake | `test_wt_05_accepts_an_empty_effects_mapping` |
-| WT-06 | An `effects` that is not a mapping is refused — a list of pairs is not one | `test_wt_06_refuses_effects_that_are_not_a_mapping` |
+| WT-05 | A weather declaring no effects is accepted, and `effects` defaults to empty — the mild end of a spectrum contributes nothing, which is an ordinary weather rather than a mistake | `test_wt_05_accepts_a_weather_declaring_no_effects` |
+| WT-06 | Anything in `effects` that is not an `EnvironmentEffect` is refused, and so is an `effects` that cannot be iterated at all | `test_wt_06_refuses_effects_that_are_not_environment_effects` |
+| WT-11 | A second effect for an effect type already declared is refused, naming the key | `test_wt_11_refuses_two_effects_for_one_effect_type` |
+| WT-12 | Effects passed as a list are stored as a tuple, so what a weather holds cannot be mutated whatever the consumer handed over | `test_wt_12_stores_effects_as_a_tuple` |
 
 ### The optional strings
 
@@ -401,9 +442,9 @@ a later idea is not fighting a ruling. Behaviour listed here still needs cases b
   values each terrain gives for the effects it overrides.
 - **`EnvironmentEffectType` is the declared shape** — `key`, `datatype`, `default` — and the consumer
   constructs one per effect type. Covered by the `EF` cases above.
-- **A type declares a kind of effect; an `EnvironmentEffect` is one with a magnitude.** The type
-  carries no value of its own, so the thing terrain and weather hold is the pairing. The same object
-  serves both, and neither invents a payload format. Covered by the `EE` cases above.
+- **A type declares a kind of effect; an `EnvironmentEffect` pairs one with a helper.** The type
+  carries no answer of its own, so the thing terrain and weather hold is the pairing. The same object
+  serves both, and neither invents a payload format.
 - **The master list lives in library code, not the consumer's.** The consumer calls
   `ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType(...))`; the library owns the container
   and its structure. The library imports the consumer's module itself, during `ready()`, so
@@ -413,12 +454,49 @@ a later idea is not fighting a ruling. Behaviour listed here still needs cases b
   YAML-authored world content assign a terrain, since a YAML file can only supply a string. Held as a
   `strattr` so it can be queried, and write-once, because a room is given its terrain when it is
   built and does not change it in play. Covered by the `TP` cases above.
-- **Terrain effect values are absolute, not operations.** A swamp's movement cost is the number the
-  author wrote. There is no merge algebra: terrain is the base value and weather modifies it, so the
-  two are not symmetric contributors to one key.
 - **Effects resolve at read time from the terrain, never cached on the room.** The room holds a
   reference; changing a terrain's numbers changes every room of that terrain with nothing to
   migrate. A per-room cache would go stale for as long as Evennia's idmapper holds the instance.
+
+### Asking a room, and how an answer is resolved
+
+- **A call site asks for one key at a time, and gets a value back.** The library returns; it never
+  reaches out and changes anything. Everything in
+  [archive/consumer-use-cases.md](archive/consumer-use-cases.md) is reachable that way — a hook that
+  was already running asks a question and decides locally.
+- **An effect carries a helper, not a value.** `f(value, **kwargs) -> value`. A static answer is a
+  stock helper — `Constant(2.0)` — so there is one shape and one code path, and a value that depends
+  on the hour or on who is asking is the same shape as one that does not.
+- **The caller's kwargs pass straight through** to every helper, including the character and anything
+  else a key needs. The library does not inspect them.
+- **Helpers read; they do not mutate.** A consumer's helper is their code and can do what they write,
+  but the library's contract is the returned value, and a helper that changes things makes a query
+  unsafe — movement prices a destination nobody is standing in.
+- **At most one effect per key per contributor.** A terrain declares one effect for `move_cost`; so
+  does a weather. A second for a key already present is refused at the declaration, naming the key,
+  identical or not — two entries in one literal is a paste error, not a module loaded twice.
+- **Resolution is the default, then terrain, then weather.** Fixed, documented, not configurable.
+  Each receives the running value; nothing declared for that key leaves it untouched.
+
+```python
+value = default_helper(None, **kwargs)
+if terrain declares this key:  value = terrain_helper(value, **kwargs)
+if weather declares this key:  value = weather_helper(value, **kwargs)
+```
+
+- **That is the whole combination rule.** No kinds, no priorities, no tiebreaks, no merge algebra.
+  One-per-contributor is what buys it: the chain is never longer than two, so there is no ordering
+  problem to solve. Whether a contribution replaces or modifies is the helper's own choice —
+  `Constant` ignores what it was handed, anything else uses it.
+- **The default is a helper too, and is the starting value.** A type whose sensible default is a
+  calculation — natural light, which is terrain and the hour together — would otherwise repeat that
+  calculation on every terrain that wanted it.
+- **The cost, taken deliberately: terrain cannot react to weather.** A vale that amplifies whatever
+  the sky is doing is not writable as a terrain effect, since terrain runs first. A weather helper can
+  look at the room's terrain and do it from that side. Nothing in the use cases wants it.
+- **Terrain tables are Python, not YAML.** A YAML file cannot hold a function. This does not touch
+  world content — a room still gets `terrain: swamp` from YAML, because that is a string naming a
+  member.
 
 ### Weather and the terrain's weather slots
 
@@ -486,11 +564,6 @@ the design conversation and left open, not a gap to be filled by whoever reads t
 
 **Weather**
 
-- `[TBD — needs discussion: whether a weather's value for a key it shares with terrain overrides the
-  terrain's value or modifies it. Modify is the working lean — a blizzard ought to cost more in a
-  swamp than on a road — and the answer decides whether a weather's payload is flat numbers like
-  terrain's or carries operations. Nothing can be written for the weather registry until it is
-  answered.]`
 - `[TBD — needs discussion: whether `WeatherType.effects` is stored as something immutable. Freezing
   the dataclass stops the attribute being rebound but not the mapping being mutated, and because
   effects resolve at read time, mutating it would change every room using that weather with nothing
@@ -514,10 +587,6 @@ the design conversation and left open, not a gap to be filled by whoever reads t
 
 - `[TBD — needs discussion: whether the library owns any tables. Nothing so far needs storing —
   terrain is declared and weather is derived from the day number — but this has not been ruled on.]`
-- `[TBD — needs discussion: whether the terrain tables are authored in YAML through
-  `evennia-yaml-reader` as well as in Python. Registration is the substrate either way; a loader is
-  additive and does not block the first cases.]`
-
 **Where this came from.** The design conversation is summarised in the umbrella's
 `ops/scratch/weather-library-exploration-2026-09-10.md`, which is a brainstorm and says so. Nothing
 in it is agreed. Treat a shape lifted from it as an invention until it has been discussed here.

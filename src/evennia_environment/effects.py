@@ -22,17 +22,68 @@ it carries — the value for a room comes from its terrain, and the registry
 supplies the fallback when the terrain declares nothing for that key.
 """
 
-from dataclasses import dataclass
-from typing import Any, Optional
+import inspect
+import typing
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
+
+
+def _rejects_helper_arguments(helper):
+    """Return why ``helper`` cannot be called as one, or ``None``.
+
+    Every contribution is called as ``helper(value, **kwargs)`` — the running
+    value positionally, and whatever the call site passed by name. Both halves
+    are checkable at the declaration with ``inspect``, without calling
+    anything, which turns a crash in play into a refusal at the line that wrote
+    it.
+    """
+    if not callable(helper):
+        return (
+            f"{helper!r} is a {type(helper).__name__} and cannot be called. A "
+            f"default is a helper, not an answer — wrap a fixed answer in one."
+        )
+
+    try:
+        parameters = inspect.signature(helper).parameters.values()
+    except (TypeError, ValueError):
+        # A builtin or a C callable may have no introspectable signature. Take
+        # it at its word rather than refusing something that would work.
+        return None
+
+    takes_value = any(
+        p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)
+        for p in parameters
+    )
+    if not takes_value:
+        return (
+            f"{helper!r} takes no positional argument. A helper is handed the "
+            f"running value first, even when it ignores it."
+        )
+
+    takes_kwargs = any(p.kind is p.VAR_KEYWORD for p in parameters)
+    if not takes_kwargs:
+        return (
+            f"{helper!r} has no **kwargs. Whatever a call site passes is handed "
+            f"to every helper, so one has to accept them even to ignore them."
+        )
+
+    return None
 
 
 @dataclass(frozen=True)
 class EnvironmentEffectType:
-    """One kind of effect a consumer's game reads. See docs/test-plan.md § EF."""
+    """One kind of effect a consumer's game reads. See docs/test-plan.md § EF.
+
+    ``return_type`` describes what a helper hands back, so it is checked
+    against an answer at the call rather than against anything declared here.
+    ``default`` answers when neither terrain nor weather declares this key.
+    ``requires`` names the kwargs a call site has to supply for it.
+    """
 
     key: str
-    datatype: type
-    default: Any
+    return_type: type
+    default: Callable
+    requires: tuple = ()
 
     def __post_init__(self):
         """Refuse a declaration that cannot be used, naming the key.
@@ -54,29 +105,56 @@ class EnvironmentEffectType:
                 "type names nothing and no terrain can declare a value for it."
             )
 
-        # ``isinstance`` below would raise ``TypeError`` rather than answering if
-        # datatype is not a type, so this check has to come first.
-        if not isinstance(self.datatype, type):
+        # ``Any`` is refused by name because it would otherwise pass the check
+        # below — isinstance(Any, type) is True — and then raise TypeError the
+        # first time an answer was checked against it. A clean boot and a crash
+        # in play is the outcome these checks exist to prevent.
+        if self.return_type is typing.Any:
             raise ValueError(
-                f"EnvironmentEffectType {self.key!r} declares datatype "
-                f"{self.datatype!r}, which is a {type(self.datatype).__name__} "
-                f"rather than a type. Pass the type itself — float, not \"float\"."
+                f"EnvironmentEffectType {self.key!r} declares a return type of "
+                f"typing.Any, which cannot be used with isinstance. Declare "
+                f"object instead — every answer satisfies it."
             )
 
-        # ``None`` is the one exemption: a consumer may want a key whose default
-        # means "unset", and what that means is decided in the code that reads
-        # the value rather than here.
-        if self.default is None:
-            return
-
-        if not isinstance(self.default, self.datatype):
+        # ``isinstance`` would raise ``TypeError`` rather than answering if
+        # return_type is not a type, so this check has to come first.
+        if not isinstance(self.return_type, type):
             raise ValueError(
-                f"EnvironmentEffectType {self.key!r} declares datatype "
-                f"{self.datatype.__name__} and a default of {self.default!r}, "
-                f"which is a {type(self.default).__name__}. The default is taken "
-                f"as declared and never converted, so write it in the type you "
-                f"asked for."
+                f"EnvironmentEffectType {self.key!r} declares a return type of "
+                f"{self.return_type!r}, which is a "
+                f"{type(self.return_type).__name__} rather than a type. Pass "
+                f"the type itself — float, not \"float\"."
             )
+
+        refusal = _rejects_helper_arguments(self.default)
+        if refusal:
+            raise ValueError(
+                f"EnvironmentEffectType {self.key!r} declares a default that "
+                f"{refusal}"
+            )
+
+        # A bare string is iterable, so ``requires="actor"`` would pass a naive
+        # check and then quietly require five kwargs named a, c, t, o and r.
+        if isinstance(self.requires, str) or not isinstance(
+            self.requires, (tuple, list)
+        ):
+            raise ValueError(
+                f"EnvironmentEffectType {self.key!r} declares requires as "
+                f"{self.requires!r}. It names the kwargs a call site must pass, "
+                f"so it is a tuple of names — ('actor',), not 'actor'."
+            )
+
+        not_names = [name for name in self.requires if not isinstance(name, str)]
+        if not_names:
+            raise ValueError(
+                f"EnvironmentEffectType {self.key!r} declares requires "
+                f"containing {not_names!r}. Every entry is a kwarg name, so "
+                f"every entry is a string."
+            )
+
+        # Normalised so the stored value is always a tuple, whatever was
+        # passed. object.__setattr__ because the dataclass is frozen.
+        object.__setattr__(self, "requires", tuple(self.requires))
 
 
 class EnvironmentEffectTypeRegistry:
@@ -104,19 +182,17 @@ class EnvironmentEffectTypeRegistry:
                 f"EnvironmentEffectType, not a {type(effect_type).__name__}."
             )
 
-        # Registering the same declaration twice is harmless — a module imported
-        # again, a consumer re-running their declarations — so it passes and
-        # changes nothing. Two *different* effect types under one key means one
-        # of them is being silently ignored, which is worth refusing.
+        # The key is the identity. A default is a helper, and two
+        # separately-written declarations hold different function objects even
+        # when they read identically — so "is this the same declaration" has no
+        # answer worth trusting, and a second one under a taken key means one of
+        # them is being ignored either way.
         existing = self._effect_types.get(effect_type.key)
         if existing is not None:
-            if existing == effect_type:
-                return
             raise ValueError(
                 f"EnvironmentEffectType {effect_type.key!r} is already "
-                f"registered as {existing!r} and cannot be redeclared as "
-                f"{effect_type!r}. One of the two declarations would be "
-                f"ignored; remove whichever is wrong."
+                f"registered as {existing!r}. One key is one effect type; "
+                f"remove whichever declaration is wrong."
             )
 
         self._effect_types[effect_type.key] = effect_type
@@ -133,17 +209,21 @@ class EnvironmentEffectTypeRegistry:
 
 @dataclass(frozen=True)
 class EnvironmentEffect:
-    """A declared effect type, and what something gives for it.
+    """A declared effect type, and the helper that answers for it.
 
-    The type says ``movement_cost`` is a float defaulting to 1.0; this says
-    that a swamp, or a blizzard, makes it 2.5. Terrain and weather both hold
-    these, so neither invents a payload format of its own.
+    The type says ``move_cost`` is a float defaulting to ``Constant(1.0)``;
+    this says what one swamp, or one blizzard, does about it. Terrain and
+    weather both hold these, so neither invents a payload format.
+
+    **Declared means changed.** A terrain or weather only declares the keys it
+    wants different from the default; silence leaves the default's answer
+    standing.
 
     See docs/test-plan.md § EE.
     """
 
     effect_type: EnvironmentEffectType
-    magnitude: Any
+    helper: Callable
 
     def __post_init__(self):
         """Refuse a declaration that cannot be used, naming the key.
@@ -151,8 +231,7 @@ class EnvironmentEffect:
         Every refusal is a ``ValueError``, as the type's are: one class for
         "you declared this wrong" is easier to catch than a type per mistake.
         """
-        # First, so the two checks below can read the datatype and the key off
-        # a type that is really one.
+        # First, so the refusal below has a key to name.
         if not isinstance(self.effect_type, EnvironmentEffectType):
             raise ValueError(
                 f"EnvironmentEffect was given {self.effect_type!r} as its "
@@ -161,26 +240,68 @@ class EnvironmentEffect:
                 f"itself, not its key."
             )
 
-        # ``None`` is exempt for a type's default, because "no default" is a
-        # real state. "No magnitude" is not one: something that does not touch
-        # an effect leaves it out of its collection, so omission already says
-        # so, and a second way to say nothing would have to be handled
-        # everywhere a magnitude is read.
-        if self.magnitude is None:
+        # The same check the type applies to its own default, so a helper that
+        # would crash at the first call is refused at the line declaring it.
+        # Nothing here looks at what it returns: return_type is checked against
+        # an answer on the call path, where it covers every contribution.
+        refusal = _rejects_helper_arguments(self.helper)
+        if refusal:
             raise ValueError(
-                f"EnvironmentEffect for {self.effect_type.key!r} has a "
-                f"magnitude of None. Leave the effect out altogether to say it "
-                f"contributes nothing."
+                f"EnvironmentEffect for {self.effect_type.key!r} declares a "
+                f"helper that {refusal}"
             )
 
-        if not isinstance(self.magnitude, self.effect_type.datatype):
+
+def one_effect_per_type(effects, declared_by):
+    """Return ``effects`` as a tuple, refusing anything that is not usable.
+
+    Shared by whatever holds a collection of them — a weather and a terrain
+    both declare one, and the rule written twice is the rule that drifts.
+
+    Args:
+        effects: what the consumer declared.
+        declared_by (str): names the declaration in a refusal, e.g.
+            ``"Weather 'blizzard'"``.
+
+    Returns:
+        tuple: the effects, in the order declared.
+
+    Raises:
+        ValueError: if it cannot be iterated, holds something that is not an
+            ``EnvironmentEffect``, or declares two for one effect type.
+    """
+    # A bare EnvironmentEffect is iterable of nothing useful and a string is
+    # iterable of characters, so both are refused by name rather than being
+    # walked into something confusing.
+    if isinstance(effects, (str, EnvironmentEffect)) or not isinstance(
+        effects, (tuple, list)
+    ):
+        raise ValueError(
+            f"{declared_by} declares effects as {effects!r}. It is a tuple of "
+            f"EnvironmentEffect — an empty one if nothing is declared."
+        )
+
+    seen = {}
+    for effect in effects:
+        if not isinstance(effect, EnvironmentEffect):
             raise ValueError(
-                f"EnvironmentEffect for {self.effect_type.key!r} has a "
-                f"magnitude of {self.magnitude!r}, which is a "
-                f"{type(self.magnitude).__name__} rather than the "
-                f"{self.effect_type.datatype.__name__} its type declares. The "
-                f"magnitude is taken as written and never converted."
+                f"{declared_by} declares {effect!r} among its effects, which "
+                f"is a {type(effect).__name__} rather than an "
+                f"EnvironmentEffect."
             )
+
+        # One per type is what keeps the resolution chain to two links, so
+        # there is no ordering to configure and no merge rule to write.
+        key = effect.effect_type.key
+        if key in seen:
+            raise ValueError(
+                f"{declared_by} declares two effects for {key!r}. One "
+                f"declaration per effect type: the second would be ignored, "
+                f"whether or not it says the same thing."
+            )
+        seen[key] = effect
+
+    return tuple(effects)
 
 
 # The list a consumer registers against, from the module they declare their game
