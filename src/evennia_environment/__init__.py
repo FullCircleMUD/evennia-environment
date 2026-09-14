@@ -18,6 +18,7 @@ built. See docs/INDEX.md for the design wiki.
 # Evennia, so nothing here runs while the app registry is still being built.
 from evennia_environment.effects import (
     ENVIRONMENT_EFFECT_TYPES,
+    EnvironmentEffect,
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
 )
@@ -27,6 +28,7 @@ __version__ = "0.0.1"
 
 __all__ = [
     "ENVIRONMENT_EFFECT_TYPES",
+    "EnvironmentEffect",
     "EnvironmentEffectType",
     "EnvironmentEffectTypeRegistry",
     "WeatherType",

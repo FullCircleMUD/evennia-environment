@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""The shape a consumer declares one effect type in, and the list it goes in.
+"""Effect types, the list they go in, and an effect type with a magnitude.
 
 An effect type is a named thing a room's surroundings can change — what it is
 called, what type its values are in, and what something that says nothing about
 it gives. The library never invents one: a consumer declares every effect type
 their game reads, and terrains are validated against that list.
 
-``EnvironmentEffectType`` validates itself on construction and raises there
-rather than collecting. A malformed declaration is the consumer's own code
-failing at their own line, and a traceback pointing at that line is worth more
-than a tidy list pointing at us. ``EnvironmentEffectTypeRegistry`` holds the
-declarations and applies the same rule to registering them.
+An ``EnvironmentEffect`` is a type paired with a magnitude. The type says
+``movement_cost`` is a float defaulting to 1.0; the effect says a swamp makes
+it 2.5. Terrain and weather both hold these, so neither invents a payload
+format of its own.
 
-**The registry holds no values.** A key's datatype and its default are all it
-carries — the value for a room comes from its terrain, and the registry supplies
-the fallback when the terrain declares nothing for that key.
+Everything here validates itself on construction and raises there rather than
+collecting. A malformed declaration is the consumer's own code failing at their
+own line, and a traceback pointing at that line is worth more than a tidy list
+pointing at us. ``EnvironmentEffectTypeRegistry`` applies the same rule to
+registering a type.
+
+**The registry holds no magnitudes.** A key's datatype and its default are all
+it carries — the value for a room comes from its terrain, and the registry
+supplies the fallback when the terrain declares nothing for that key.
 """
 
 from dataclasses import dataclass
@@ -124,6 +129,58 @@ class EnvironmentEffectTypeRegistry:
         the question being asked.
         """
         return self._effect_types.get(key)
+
+
+@dataclass(frozen=True)
+class EnvironmentEffect:
+    """A declared effect type, and what something gives for it.
+
+    The type says ``movement_cost`` is a float defaulting to 1.0; this says
+    that a swamp, or a blizzard, makes it 2.5. Terrain and weather both hold
+    these, so neither invents a payload format of its own.
+
+    See docs/test-plan.md § EE.
+    """
+
+    effect_type: EnvironmentEffectType
+    magnitude: Any
+
+    def __post_init__(self):
+        """Refuse a declaration that cannot be used, naming the key.
+
+        Every refusal is a ``ValueError``, as the type's are: one class for
+        "you declared this wrong" is easier to catch than a type per mistake.
+        """
+        # First, so the two checks below can read the datatype and the key off
+        # a type that is really one.
+        if not isinstance(self.effect_type, EnvironmentEffectType):
+            raise ValueError(
+                f"EnvironmentEffect was given {self.effect_type!r} as its "
+                f"effect type, which is a {type(self.effect_type).__name__} "
+                f"rather than an EnvironmentEffectType. Pass the declared type "
+                f"itself, not its key."
+            )
+
+        # ``None`` is exempt for a type's default, because "no default" is a
+        # real state. "No magnitude" is not one: something that does not touch
+        # an effect leaves it out of its collection, so omission already says
+        # so, and a second way to say nothing would have to be handled
+        # everywhere a magnitude is read.
+        if self.magnitude is None:
+            raise ValueError(
+                f"EnvironmentEffect for {self.effect_type.key!r} has a "
+                f"magnitude of None. Leave the effect out altogether to say it "
+                f"contributes nothing."
+            )
+
+        if not isinstance(self.magnitude, self.effect_type.datatype):
+            raise ValueError(
+                f"EnvironmentEffect for {self.effect_type.key!r} has a "
+                f"magnitude of {self.magnitude!r}, which is a "
+                f"{type(self.magnitude).__name__} rather than the "
+                f"{self.effect_type.datatype.__name__} its type declares. The "
+                f"magnitude is taken as written and never converted."
+            )
 
 
 # The list a consumer registers against, from the module they declare their game

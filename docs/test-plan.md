@@ -18,12 +18,14 @@ designed is in [Open decisions](#open-decisions) below.
 | `SC` | The scaffold — the package installs and the runner runs |
 | `EF` | `EnvironmentEffectType` — the shape a consumer declares one effect type in |
 | `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
+| `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
 
 ## Fixtures
 
-None. The `EF` and `WT` cases are pure Python — each takes its values and validates them against each
-other, with no Evennia, no database and no room. The fixtures table grows when a surface needs one.
+None. The `EF`, `EE` and `WT` cases are pure Python — each takes its values and validates them against
+each other, with no Evennia, no database and no room. The fixtures table grows when a surface needs
+one.
 
 ## SC — the scaffold
 
@@ -45,7 +47,7 @@ the registry and the terrain tables, not to this.
 
 | ID | Case | Test function |
 |---|---|---|
-| EF-01 | A valid effect carries its key, datatype and default unchanged | `test_ef_01_carries_its_key_datatype_and_default` |
+| EF-01 | A valid effect type carries its key, datatype and default unchanged | `test_ef_01_carries_its_key_datatype_and_default` |
 | EF-02 | The instance is frozen — assigning to a field after construction raises | `test_ef_02_is_frozen` |
 
 ### The key
@@ -53,7 +55,7 @@ the registry and the terrain tables, not to this.
 | ID | Case | Test function |
 |---|---|---|
 | EF-03 | A key that is not a string is refused | `test_ef_03_refuses_a_key_that_is_not_a_string` |
-| EF-04 | An empty key is refused — without a key the effect names nothing | `test_ef_04_refuses_an_empty_key` |
+| EF-04 | An empty key is refused — without a key the effect type names nothing | `test_ef_04_refuses_an_empty_key` |
 
 ### The datatype
 
@@ -144,6 +146,62 @@ a consumer re-running their declarations — so it passes and changes nothing.
 |---|---|---|
 | ER-10 | Two registries do not share state — registering in one leaves the other empty | `test_er_10_two_registries_do_not_share_state` |
 
+## EE — `EnvironmentEffect(effect_type, magnitude)`
+
+A frozen dataclass pairing a declared effect type with the value something gives for it. This is what
+terrain and weather actually carry: `EnvironmentEffectType` says `movement_cost` is a float
+defaulting to 1.0, and an `EnvironmentEffect` says this swamp, or this blizzard, makes it 2.5.
+
+```python
+EnvironmentEffect(MOVEMENT_COST, 2.5)
+```
+
+**The magnitude is checked against the type's own datatype** — the same `isinstance` rule, at the
+same strictness the type applies to its default. No coercion, no widening, and a bool passing an
+`int` datatype follows from the rule here exactly as it does in EF-10. The check reads the datatype
+off the type it was handed, so nothing that *holds* these objects does any checking: not
+`WeatherType`, not terrain.
+
+**The check lives here rather than as a method on the type.** Terrain and weather both hold
+`EnvironmentEffect` objects, so there is one call site, and a `validate()` on the type would be
+indirection waiting for a second caller that does not exist.
+
+**A `None` magnitude is refused, and that is not EF-11 being contradicted.** A type may default to
+`None` because "no default" is a real state. "No magnitude" is not one: something that does not touch
+visibility leaves visibility out of its collection, so omission already says it. A second way to say
+nothing would have to be handled everywhere a value is read.
+
+**It carries no key of its own.** The key belongs to the type and is reached through it. An accessor
+that saves the hop waits for a caller that wants one.
+
+### Construction
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-01 | A valid effect carries its type and magnitude unchanged, and the type is the object that was passed | `test_ee_01_carries_its_type_and_magnitude` |
+| EE-02 | The instance is frozen — assigning to a field after construction raises | `test_ee_02_is_frozen` |
+
+### The effect type
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-03 | An effect type that is not an `EnvironmentEffectType` is refused — `"movement_cost"` names one and is a string | `test_ee_03_refuses_a_type_that_is_not_an_effect_type` |
+
+### The magnitude, against the type's datatype
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-04 | A magnitude of the type's declared datatype is accepted and stored unchanged | `test_ee_04_accepts_a_magnitude_of_the_declared_datatype` |
+| EE-05 | A magnitude of an unrelated type is refused — `2.5` against a `str` effect type | `test_ee_05_refuses_a_magnitude_of_an_unrelated_type` |
+| EE-06 | An int magnitude for a `float` effect type is refused, not widened. This is the rule most likely to be relaxed into a kindness later, so it is pinned | `test_ee_06_refuses_an_int_magnitude_for_a_float_type` |
+| EE-07 | A `None` magnitude is refused, whatever the datatype | `test_ee_07_refuses_a_none_magnitude` |
+
+### The refusal
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-08 | Every refusal is a `ValueError`. Where the type is a real `EnvironmentEffectType` the message names its key, so the consumer can find the declaration; where it is not, it names what was passed instead | `test_ee_08_every_refusal_is_a_value_error_naming_the_key` |
+
 ## WT — `WeatherType(key, effects, description, transition_in)`
 
 A frozen dataclass, and the only thing a consumer constructs to declare one weather. It carries the
@@ -223,6 +281,9 @@ a later idea is not fighting a ruling. Behaviour listed here still needs cases b
   values each terrain gives for the effects it overrides.
 - **`EnvironmentEffectType` is the declared shape** — `key`, `datatype`, `default` — and the consumer
   constructs one per effect type. Covered by the `EF` cases above.
+- **A type declares a kind of effect; an `EnvironmentEffect` is one with a magnitude.** The type
+  carries no value of its own, so the thing terrain and weather hold is the pairing. The same object
+  serves both, and neither invents a payload format. Covered by the `EE` cases above.
 - **The master list lives in library code, not the consumer's.** The consumer calls
   `ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType(...))`; the library owns the container
   and its structure. The library imports the consumer's module itself, during `ready()`, so

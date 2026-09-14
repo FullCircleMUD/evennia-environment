@@ -10,6 +10,7 @@ from unittest import TestCase
 
 import evennia_environment
 from evennia_environment import (
+    EnvironmentEffect,
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
     WeatherType,
@@ -222,6 +223,92 @@ class EffectTypeRegistryIsolationTests(TestCase):
         registry.register(MOVEMENT_COST)
 
         self.assertIsNone(other.get("movement_cost"))
+
+
+# A second type, declared in a datatype nothing numeric will satisfy, so a
+# magnitude of the wrong type has something to be wrong against.
+GROUND_COVER = EnvironmentEffectType(key="ground_cover", datatype=str, default="bare")
+
+
+class EffectConstructionTests(TestCase):
+    """EE-01 — EE-02. What a valid pairing gives back."""
+
+    def test_ee_01_carries_its_type_and_magnitude(self):
+        """EE-01"""
+        effect = EnvironmentEffect(MOVEMENT_COST, 2.5)
+
+        self.assertIs(effect.effect_type, MOVEMENT_COST)
+        self.assertEqual(effect.magnitude, 2.5)
+
+    def test_ee_02_is_frozen(self):
+        """EE-02"""
+        effect = EnvironmentEffect(MOVEMENT_COST, 2.5)
+
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            effect.magnitude = 3.0
+
+
+class EffectTypeReferenceTests(TestCase):
+    """EE-03. The pairing takes the declared type, not a stand-in for one."""
+
+    def test_ee_03_refuses_a_type_that_is_not_an_effect_type(self):
+        """EE-03"""
+        for not_a_type in ("movement_cost", 42, None):
+            with self.subTest(effect_type=not_a_type):
+                with self.assertRaises(ValueError):
+                    EnvironmentEffect(not_a_type, 2.5)
+
+
+class EffectMagnitudeTests(TestCase):
+    """EE-04 — EE-07. The magnitude is checked against the type's datatype.
+
+    The same ``isinstance`` rule the type applies to its own default, read off
+    the type that was handed over. ``None`` is not exempt here as it is there:
+    omission from a collection is how absence is said.
+    """
+
+    def test_ee_04_accepts_a_magnitude_of_the_declared_datatype(self):
+        """EE-04"""
+        effect = EnvironmentEffect(MOVEMENT_COST, 2.5)
+
+        self.assertEqual(effect.magnitude, 2.5)
+        self.assertIsInstance(effect.magnitude, float)
+
+    def test_ee_05_refuses_a_magnitude_of_an_unrelated_type(self):
+        """EE-05"""
+        with self.assertRaises(ValueError):
+            EnvironmentEffect(GROUND_COVER, 2.5)
+
+    def test_ee_06_refuses_an_int_magnitude_for_a_float_type(self):
+        """EE-06"""
+        with self.assertRaises(ValueError):
+            EnvironmentEffect(MOVEMENT_COST, 1)
+
+    def test_ee_07_refuses_a_none_magnitude(self):
+        """EE-07"""
+        for effect_type in (MOVEMENT_COST, GROUND_COVER):
+            with self.subTest(effect_type=effect_type):
+                with self.assertRaises(ValueError):
+                    EnvironmentEffect(effect_type, None)
+
+
+class EffectRefusalTests(TestCase):
+    """EE-08. One exception class, and it says which declaration is wrong."""
+
+    def test_ee_08_every_refusal_is_a_value_error_naming_the_key(self):
+        """EE-08"""
+        for magnitude in ("fast", 1, None):
+            with self.subTest(magnitude=magnitude):
+                with self.assertRaises(ValueError) as caught:
+                    EnvironmentEffect(MOVEMENT_COST, magnitude)
+                self.assertIn("movement_cost", str(caught.exception))
+
+        # With no real type there is no key to name, so the refusal names what
+        # it was handed instead.
+        with self.assertRaises(ValueError) as caught:
+            EnvironmentEffect(42, 2.5)
+
+        self.assertIn("42", str(caught.exception))
 
 
 # A weather is never built at module scope here: every case constructs its own,
