@@ -30,6 +30,7 @@ from evennia_environment.helpers import (
     RoundDown,
     RoundUp,
 )
+from evennia_environment.resolve import resolve
 from evennia_environment.terrain import TerrainType
 from evennia_environment.weather import WeatherSlot, WeatherType
 
@@ -49,4 +50,5 @@ __all__ = [
     "TerrainType",
     "WeatherSlot",
     "WeatherType",
+    "resolve",
 ]

@@ -26,6 +26,7 @@ from evennia_environment import (
     TerrainType,
     WeatherSlot,
     WeatherType,
+    resolve,
 )
 
 
@@ -846,6 +847,188 @@ class TerrainTypeRefusalTests(TestCase):
                 with self.assertRaises(ValueError) as caught:
                     TerrainType(**declaration)
                 self.assertIn(str(declaration["key"]), str(caught.exception))
+
+
+def _ten_still_slots():
+    """Ten slots of one weather, for a terrain whose weather is beside the point."""
+    still = WeatherType(key="still_air")
+    return {n: still for n in range(1, 11)}
+
+
+class ResolveTests(TestCase):
+    """RS-01 — RS-05. What a key answers, given who declares it."""
+
+    def _type(self, default=None, requires=()):
+        return EnvironmentEffectType(
+            key="movement_cost",
+            return_type=float,
+            default=default or _constant(1.0),
+            requires=requires,
+        )
+
+    def _terrain(self, *effects):
+        return TerrainType(
+            key="swamp", effects=effects, weather_slots=_ten_still_slots()
+        )
+
+    def test_rs_01_with_neither_contributor_the_default_answers(self):
+        """RS-01"""
+        self.assertEqual(resolve(self._type()), 1.0)
+
+    def test_rs_02_a_terrain_is_handed_the_defaults_answer(self):
+        """RS-02"""
+        effect_type = self._type()
+        terrain = self._terrain(EnvironmentEffect(effect_type, Add(1.0)))
+
+        self.assertEqual(resolve(effect_type, terrain_type=terrain), 2.0)
+
+    def test_rs_03_a_weather_is_handed_the_defaults_answer(self):
+        """RS-03"""
+        effect_type = self._type()
+        weather = WeatherType(
+            key="blizzard", effects=(EnvironmentEffect(effect_type, Add(1.0)),)
+        )
+
+        self.assertEqual(resolve(effect_type, weather_type=weather), 2.0)
+
+    def test_rs_04_terrain_runs_then_weather(self):
+        """RS-04"""
+        effect_type = self._type()
+        terrain = self._terrain(EnvironmentEffect(effect_type, Add(1.0)))
+        weather = WeatherType(
+            key="blizzard", effects=(EnvironmentEffect(effect_type, Multiply(3.0)),)
+        )
+
+        # 1.0 -> +1 -> 2.0 -> x3 -> 6.0. The other order would give 4.0, so the
+        # number proves the sequence rather than only the arithmetic.
+        self.assertEqual(
+            resolve(effect_type, terrain_type=terrain, weather_type=weather), 6.0
+        )
+
+    def test_rs_05_a_contributor_declaring_other_keys_changes_nothing(self):
+        """RS-05"""
+        effect_type = self._type()
+        other = EnvironmentEffectType(
+            key="visibility", return_type=float, default=_constant(1.0)
+        )
+        terrain = self._terrain(EnvironmentEffect(other, Constant(0.2)))
+        weather = WeatherType(
+            key="fog", effects=(EnvironmentEffect(other, Constant(0.1)),)
+        )
+
+        self.assertEqual(
+            resolve(effect_type, terrain_type=terrain, weather_type=weather), 1.0
+        )
+
+
+class ResolveKwargTests(TestCase):
+    """RS-06 — RS-08. What the call site passes, and what is required."""
+
+    def test_rs_06_the_kwargs_reach_every_helper(self):
+        """RS-06"""
+        seen = []
+
+        def _watching(value, **kwargs):
+            seen.append(kwargs)
+            # The default is handed None, nothing having run before it, so it
+            # has to produce the starting value rather than pass one on.
+            return 1.0 if value is None else value
+
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_watching
+        )
+        terrain = TerrainType(
+            key="swamp",
+            effects=(EnvironmentEffect(effect_type, _watching),),
+            weather_slots=_ten_still_slots(),
+        )
+        weather = WeatherType(
+            key="blizzard", effects=(EnvironmentEffect(effect_type, _watching),)
+        )
+
+        resolve(
+            effect_type,
+            terrain_type=terrain,
+            weather_type=weather,
+            actor="someone",
+        )
+
+        self.assertEqual(seen, [{"actor": "someone"}] * 3)
+
+    def test_rs_07_refuses_a_missing_required_kwarg(self):
+        """RS-07"""
+        effect_type = EnvironmentEffectType(
+            key="movement_cost",
+            return_type=float,
+            default=_constant(1.0),
+            requires=("actor", "door"),
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            resolve(effect_type, actor="someone")
+
+        message = str(caught.exception)
+        self.assertIn("movement_cost", message)
+        self.assertIn("door", message)
+
+    def test_rs_08_passes_through_kwargs_beyond_what_is_required(self):
+        """RS-08"""
+        effect_type = EnvironmentEffectType(
+            key="movement_cost",
+            return_type=float,
+            default=_constant(1.0),
+            requires=("actor",),
+        )
+
+        self.assertEqual(
+            resolve(effect_type, actor="someone", door="a door"), 1.0
+        )
+
+
+class ResolveReturnTypeTests(TestCase):
+    """RS-09 — RS-11. A wrong answer names whichever helper gave it."""
+
+    def test_rs_09_refuses_a_default_returning_the_wrong_type(self):
+        """RS-09"""
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_constant("fast")
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            resolve(effect_type)
+
+        self.assertIn("default", str(caught.exception))
+
+    def test_rs_10_refuses_a_terrain_helper_returning_the_wrong_type(self):
+        """RS-10"""
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_constant(1.0)
+        )
+        terrain = TerrainType(
+            key="swamp",
+            effects=(EnvironmentEffect(effect_type, _constant("fast")),),
+            weather_slots=_ten_still_slots(),
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            resolve(effect_type, terrain_type=terrain)
+
+        self.assertIn("swamp", str(caught.exception))
+
+    def test_rs_11_refuses_a_weather_helper_returning_the_wrong_type(self):
+        """RS-11"""
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_constant(1.0)
+        )
+        weather = WeatherType(
+            key="blizzard",
+            effects=(EnvironmentEffect(effect_type, _constant("fast")),),
+        )
+
+        with self.assertRaises(ValueError) as caught:
+            resolve(effect_type, weather_type=weather)
+
+        self.assertIn("blizzard", str(caught.exception))
 
 
 class TerrainPropertyTests(DjangoTestCase):

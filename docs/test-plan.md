@@ -24,6 +24,7 @@ designed is in [Open decisions](#open-decisions) below.
 | `WS` | `WeatherSlot` — one of a terrain's ten slots, day and night |
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
 | `TP` | `TerrainProperty` — the attribute a room's terrain is held in |
+| `RS` | `resolve()` — what a key answers, given a terrain and a weather |
 
 ## Fixtures
 
@@ -582,6 +583,61 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | ID | Why |
 |---|---|
 | TP-06 | Was "`None` is refused". Reversed by `autocreate=True` — the default is pushed through `at_set()` on first read, so refusing `None` makes an unassigned room unreadable. TP-11 and TP-14 carry the two halves of what replaced it |
+
+## RS — `resolve(effect_type, terrain_type, weather_type, **kwargs)`
+
+What a key answers. Given an effect type and whichever contributors apply, it runs them in order and
+returns the value.
+
+**Pure Python.** It takes the terrain and the weather as arguments rather than finding them, so it
+needs no room, no database and no Evennia. The room accessor becomes a thin wrapper that finds both
+and delegates. A consumer with a room-like thing that is not a room can call it directly.
+
+**Both contributors are optional.** A room with no terrain, or one whose weather is not known yet,
+still gets an answer — the default's.
+
+```
+value = effect_type.default(None, **kwargs)
+if terrain declares this key:  value = terrain_helper(value, **kwargs)
+if weather declares this key:  value = weather_helper(value, **kwargs)
+```
+
+**The return type is checked after every step, not once at the end**, so a refusal says which
+contributor got it wrong rather than leaving three candidates. The default is checked too — a broken
+default is as wrong as a broken contribution.
+
+**The default is handed `None`**, nothing having run before it, so it produces the starting value
+rather than passing one on. A helper written to return what it was given is a valid contribution and
+an invalid default.
+
+**Refusals are `ValueError`**, as every other refusal in this library is, with the message naming who
+is at fault: the call site for a missing kwarg, the contributor for a bad return.
+
+### Resolution
+
+| ID | Case | Test function |
+|---|---|---|
+| RS-01 | With neither contributor, the default's answer comes back | `test_rs_01_with_neither_contributor_the_default_answers` |
+| RS-02 | With only a terrain, its helper is handed the default's answer and its result is returned | `test_rs_02_a_terrain_is_handed_the_defaults_answer` |
+| RS-03 | With only a weather, its helper is handed the default's answer | `test_rs_03_a_weather_is_handed_the_defaults_answer` |
+| RS-04 | With both, terrain runs and then weather, each handed the running value. Proved with order-sensitive helpers, so a run in either order gives a different number | `test_rs_04_terrain_runs_then_weather` |
+| RS-05 | A contributor that declares other keys but not this one changes nothing | `test_rs_05_a_contributor_declaring_other_keys_changes_nothing` |
+
+### What the caller passes
+
+| ID | Case | Test function |
+|---|---|---|
+| RS-06 | The caller's kwargs reach every helper, the default included | `test_rs_06_the_kwargs_reach_every_helper` |
+| RS-07 | A missing required kwarg is refused, naming the key and which kwarg is absent | `test_rs_07_refuses_a_missing_required_kwarg` |
+| RS-08 | Kwargs beyond what the key requires are passed through rather than refused, so a helper can use an optional one | `test_rs_08_passes_through_kwargs_beyond_what_is_required` |
+
+### What a helper hands back
+
+| ID | Case | Test function |
+|---|---|---|
+| RS-09 | A default returning something other than the declared return type is refused, and the refusal says it was the default | `test_rs_09_refuses_a_default_returning_the_wrong_type` |
+| RS-10 | A terrain helper returning the wrong type is refused, and the refusal says it was the terrain | `test_rs_10_refuses_a_terrain_helper_returning_the_wrong_type` |
+| RS-11 | A weather helper returning the wrong type is refused, and the refusal says it was the weather | `test_rs_11_refuses_a_weather_helper_returning_the_wrong_type` |
 
 ## Current thinking
 
