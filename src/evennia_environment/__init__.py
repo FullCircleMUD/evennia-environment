@@ -8,24 +8,26 @@ belongs to the room. **Weather** varies with the calendar and belongs to the
 region. Both speak the same vocabulary: effect keys the consumer registers, and
 values a call site asks for by name.
 
-``EnvironmentEffect`` and ``ENVIRONMENT_EFFECTS`` are the public surface so
+``EnvironmentEffectType`` and ``ENVIRONMENT_EFFECT_TYPES`` are the public surface so
 far — the shape a consumer declares one effect in, and the list they declare it
 to. The rest of the design is being agreed in docs/test-plan.md before it is
 built. See docs/INDEX.md for the design wiki.
 """
 
-# Safe at module scope: effects.py is pure Python and imports neither Django nor
+# Safe at module scope: both are pure Python and import neither Django nor
 # Evennia, so nothing here runs while the app registry is still being built.
 from evennia_environment.effects import (
-    ENVIRONMENT_EFFECTS,
-    EnvironmentEffect,
-    EnvironmentEffectRegistry,
+    ENVIRONMENT_EFFECT_TYPES,
+    EnvironmentEffectType,
+    EnvironmentEffectTypeRegistry,
 )
+from evennia_environment.weather import WeatherType
 
 __version__ = "0.0.1"
 
 __all__ = [
-    "ENVIRONMENT_EFFECTS",
-    "EnvironmentEffect",
-    "EnvironmentEffectRegistry",
+    "ENVIRONMENT_EFFECT_TYPES",
+    "EnvironmentEffectType",
+    "EnvironmentEffectTypeRegistry",
+    "WeatherType",
 ]

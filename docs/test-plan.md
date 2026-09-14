@@ -16,14 +16,14 @@ designed is in [Open decisions](#open-decisions) below.
 | Prefix | Covers |
 |---|---|
 | `SC` | The scaffold — the package installs and the runner runs |
-| `EF` | `EnvironmentEffect` — the shape a consumer declares one effect in |
-| `ER` | `EnvironmentEffectRegistry` — the master list, and registering against it |
+| `EF` | `EnvironmentEffectType` — the shape a consumer declares one effect type in |
+| `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
+| `WT` | `WeatherType` — the shape a consumer declares one weather in |
 
 ## Fixtures
 
-None. The `EF` cases are pure Python — `EnvironmentEffect` takes three values and validates them
-against each other, with no Evennia, no database and no room. The fixtures table grows when a surface
-needs one.
+None. The `EF` and `WT` cases are pure Python — each takes its values and validates them against each
+other, with no Evennia, no database and no room. The fixtures table grows when a surface needs one.
 
 ## SC — the scaffold
 
@@ -31,13 +31,13 @@ needs one.
 |---|---|---|
 | SC-01 | The package imports and reports its version | `test_sc_01_package_imports_and_reports_its_version` |
 
-## EF — `EnvironmentEffect(key, datatype, default)`
+## EF — `EnvironmentEffectType(key, datatype, default)`
 
-A frozen dataclass, and the only thing a consumer constructs to declare an effect. It carries the
+A frozen dataclass, and the only thing a consumer constructs to declare an effect type. It carries the
 key's name, the type its values are in, and the value a terrain gets when it declares nothing.
 
 **It validates itself in `__post_init__`, and it raises there rather than collecting.** A malformed
-`EnvironmentEffect(...)` is the consumer's own code failing at their own line, and a traceback
+`EnvironmentEffectType(...)` is the consumer's own code failing at their own line, and a traceback
 pointing at that line is worth more than a tidy list pointing at us. Boot-time collection applies to
 the registry and the terrain tables, not to this.
 
@@ -83,23 +83,24 @@ exemption.
 |---|---|---|
 | EF-12 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration. One class for all of them — each one means "you declared this wrong", and one class is easier to catch | `test_ef_12_every_refusal_is_a_value_error_naming_the_key` |
 
-## ER — `EnvironmentEffectRegistry` and `register()`
+## ER — `EnvironmentEffectTypeRegistry` and `register()`
 
-The master list of effects. It lives in library code so the library owns its structure, and a consumer
-adds to it from the module they declare their game in:
+The master list of effect types. It lives in library code so the library owns its structure, and
+a consumer adds to it from the module they declare their game in:
 
 ```python
-from evennia_environment import ENVIRONMENT_EFFECTS, EnvironmentEffect
+from evennia_environment import ENVIRONMENT_EFFECT_TYPES, EnvironmentEffectType
 
-ENVIRONMENT_EFFECTS.register(EnvironmentEffect("movement_cost", float, 1.0))
+ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType("movement_cost", float, 1.0))
 ```
 
-**`ENVIRONMENT_EFFECTS` is an instance, not a module-level dict.** `EnvironmentEffectRegistry` is a
-class and `ENVIRONMENT_EFFECTS` is the one the library exposes, so a test builds its own and no case
-has to reset shared state between runs. ER-10 pins that the container is per-instance rather than a
-mutable class attribute, which is where this design goes wrong if it goes wrong.
+**`ENVIRONMENT_EFFECT_TYPES` is an instance, not a module-level dict.**
+`EnvironmentEffectTypeRegistry` is a class and `ENVIRONMENT_EFFECT_TYPES` is the one the library
+exposes, so a test builds its own and no case has to reset shared state between runs. ER-10 pins
+that the container is per-instance rather than a mutable class attribute, which is where this
+design goes wrong if it goes wrong.
 
-**Registration raises immediately**, like `EnvironmentEffect` itself, and for the same reason: the
+**Registration raises immediately**, like `EnvironmentEffectType` itself, and for the same reason: the
 call is in the consumer's own module, at a line they wrote. Boot-time collection belongs to
 `check_settings()`, which is a separate piece of work — nothing here knows about settings, imports or
 Django.
@@ -107,7 +108,7 @@ Django.
 **The registry holds no values.** A key's datatype and its default are all it carries. The value for a
 room comes from its terrain; the registry supplies the fallback when the terrain declares nothing for
 that key, and the list a terrain's keys are validated against. Both of its jobs are served by
-`get(key)`, which returns the `EnvironmentEffect` or `None`.
+`get(key)`, which returns the `EnvironmentEffectType` or `None`.
 
 **`None` is a legitimate answer, not a failure.** Validating a terrain means asking about keys that
 may not be registered — that is the question being asked — so a miss is an ordinary outcome and `get`
@@ -120,22 +121,22 @@ the master list each wait for a caller that wants them.
 
 | ID | Case | Test function |
 |---|---|---|
-| ER-01 | A registered effect can be looked up by its key, and is the object that was registered | `test_er_01_a_registered_effect_is_returned_by_its_key` |
-| ER-02 | Registering something that is not an `EnvironmentEffect` is refused | `test_er_02_refuses_something_that_is_not_an_effect` |
+| ER-01 | A registered effect type can be looked up by its key, and is the object that was registered | `test_er_01_a_registered_effect_type_is_returned_by_its_key` |
+| ER-02 | Registering something that is not an `EnvironmentEffectType` is refused | `test_er_02_refuses_something_that_is_not_an_effect_type` |
 | ER-03 | A fresh registry has nothing registered | `test_er_03_a_fresh_registry_has_nothing_registered` |
 | ER-11 | `get()` on a key nobody registered returns `None` | `test_er_11_an_unregistered_key_returns_none` |
 
 ### The duplicate-key rule
 
-An effect declared twice means one of the two declarations is being silently ignored, which is worth
-refusing. Declaring the *same* effect twice is harmless — a module imported again, a consumer
-re-running their declarations — so it passes and changes nothing.
+An effect type declared twice means one of the two declarations is being silently ignored, which
+is worth refusing. Declaring the *same* effect type twice is harmless — a module imported again,
+a consumer re-running their declarations — so it passes and changes nothing.
 
 | ID | Case | Test function |
 |---|---|---|
-| ER-04 | A second, different `EnvironmentEffect` under a key already registered is refused | `test_er_04_refuses_a_different_effect_under_a_taken_key` |
-| ER-05 | Re-registering an identical `EnvironmentEffect` passes, and the key still resolves to that effect | `test_er_05_accepts_an_identical_effect_registered_twice` |
-| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every `EnvironmentEffect` refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
+| ER-04 | A second, different `EnvironmentEffectType` under a key already registered is refused | `test_er_04_refuses_a_different_effect_type_under_a_taken_key` |
+| ER-05 | Re-registering an identical `EnvironmentEffectType` passes, and the key still resolves to that effect type | `test_er_05_accepts_an_identical_effect_type_registered_twice` |
+| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every `EnvironmentEffectType` refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
 
 ### Isolation
 
@@ -143,20 +144,89 @@ re-running their declarations — so it passes and changes nothing.
 |---|---|---|
 | ER-10 | Two registries do not share state — registering in one leaves the other empty | `test_er_10_two_registries_do_not_share_state` |
 
-## Settled
+## WT — `WeatherType(key, effects, description, transition_in)`
 
-What the design conversation has agreed, recorded so it is not reopened. Behaviour listed here still
-needs cases before it is built.
+A frozen dataclass, and the only thing a consumer constructs to declare one weather. It carries the
+name the library looks it up by, what the weather contributes while it is active, and two optional
+strings the consumer may render.
+
+**It validates itself in `__post_init__` and raises there**, as `EnvironmentEffectType` does and
+for the same reason: the declaration is a line in the consumer's own module, and the traceback
+should point at it.
+
+**Nothing constrains the key beyond being a non-empty string.** Spaces and punctuation are legal, as
+they are for an effect key — the rule is the same on both, and a key with a space breaks nothing,
+since it is a mapping handle. A player never sees it; they see `description` and `transition_in`.
+Whether builder-facing surfaces make a spaced key awkward to type is a question for those surfaces
+when they exist.
+
+**It does not check its effect keys against the master list.** A weather may be declared before the
+effects it names are registered — both happen in the consumer's own module, in whatever order they
+wrote them — so refusing here would reject a declaration that is correct by the time the game boots.
+That check belongs with boot validation, alongside the terrain tables.
+
+**The two strings are opaque.** The library stores them and hands them back; it never renders them,
+never decides when they are shown and never compares them. `description` is the weather line a
+consumer puts under a room description. `transition_in` is what they render when this weather becomes
+active — one per weather rather than a message per from-to pair, because an incoming message reads
+correctly from any predecessor, and N strings beat N².
+
+**The values inside `effects` are not covered here.** Whether a weather's value for a key overrides
+terrain's or modifies it is open — see [Open decisions](#open-decisions) — and the answer decides
+whether a value is a plain number or an operation. The cases below cover the mapping's presence and
+shape, not what is in it.
+
+### Construction
+
+| ID | Case | Test function |
+|---|---|---|
+| WT-01 | A valid weather type carries its key, effects, description and transition_in unchanged | `test_wt_01_carries_its_key_effects_and_both_strings` |
+| WT-02 | The instance is frozen — assigning to a field after construction raises | `test_wt_02_is_frozen` |
+
+### The key
+
+| ID | Case | Test function |
+|---|---|---|
+| WT-03 | A key that is not a string is refused | `test_wt_03_refuses_a_key_that_is_not_a_string` |
+| WT-04 | An empty key is refused — without a key the weather names nothing and no slot can hold it | `test_wt_04_refuses_an_empty_key` |
+
+### The effects mapping
+
+| ID | Case | Test function |
+|---|---|---|
+| WT-05 | A weather declaring an empty effects mapping is accepted — the mild end of a spectrum contributes nothing, and that is an ordinary weather rather than a mistake | `test_wt_05_accepts_an_empty_effects_mapping` |
+| WT-06 | An `effects` that is not a mapping is refused — a list of pairs is not one | `test_wt_06_refuses_effects_that_are_not_a_mapping` |
+
+### The optional strings
+
+| ID | Case | Test function |
+|---|---|---|
+| WT-07 | Both strings default to `None` when the consumer declares neither | `test_wt_07_both_strings_default_to_none` |
+| WT-08 | A description that is not a string is refused | `test_wt_08_refuses_a_description_that_is_not_a_string` |
+| WT-09 | A transition_in that is not a string is refused | `test_wt_09_refuses_a_transition_in_that_is_not_a_string` |
+
+### The refusal
+
+| ID | Case | Test function |
+|---|---|---|
+| WT-10 | Every refusal is a `ValueError` naming the key, as every `EnvironmentEffectType` refusal is | `test_wt_10_every_refusal_is_a_value_error_naming_the_key` |
+
+## Current thinking
+
+Where the design has got to. Everything here is the current working position and open to revision —
+a later idea is not fighting a ruling. Behaviour listed here still needs cases before it is built.
+
+### The effects vocabulary
 
 - **The consumer declares three things in one module, and one setting names that module.** Their
   terrain types as an `Enum`, their effects registered against the library's master list, and the
   values each terrain gives for the effects it overrides.
-- **`EnvironmentEffect` is the declared shape** — `key`, `datatype`, `default` — and the consumer
-  constructs one per effect. Covered by the `EF` cases above.
+- **`EnvironmentEffectType` is the declared shape** — `key`, `datatype`, `default` — and the consumer
+  constructs one per effect type. Covered by the `EF` cases above.
 - **The master list lives in library code, not the consumer's.** The consumer calls
-  `ENVIRONMENT_EFFECTS.register(EnvironmentEffect(...))`; the library owns the container and its
-  structure. The library imports the consumer's module itself, during `ready()`, so registration
-  happens at a known moment.
+  `ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType(...))`; the library owns the container
+  and its structure. The library imports the consumer's module itself, during `ready()`, so
+  registration happens at a known moment.
 - **A room stores its terrain as the `Enum` member**, validated in `at_set()`, which also accepts the
   member's string value so YAML-authored world content resolves at the assignment rather than later.
   Evennia's `dbserialize` round-trips an Enum member with identity intact.
@@ -167,9 +237,46 @@ needs cases before it is built.
   reference; changing a terrain's numbers changes every room of that terrain with nothing to
   migrate. A per-room cache would go stale for as long as Evennia's idmapper holds the instance.
 
+### Weather and the terrain's weather slots
+
+- **Weather types are registered the way effects are.** `blizzard`, `thunderstorm`, `scorching_hot` —
+  one entry each, declared once and referenced from any terrain that can have it. The names are the
+  consumer's, as the effect keys are.
+- **A weather type carries environment effects**, against keys the consumer has already registered. A
+  weather with no effects at all is legal and expected: the mild end of a spectrum — sunny with some
+  clouds — contributes nothing.
+- **It also carries two optional strings the consumer renders and the library never touches** — a
+  description for the weather line under a room description, and a transition rendered when this
+  weather becomes active. One incoming message per weather, not a message per from-to pair. Covered
+  by the `WT` cases above.
+- **A terrain carries its own environment effects too**, always in force and independent of the
+  weather. Crossing a swamp costs more whatever the sky is doing.
+- **A terrain has exactly ten numbered weather slots, every one filled.** Not "up to ten". The same
+  weather may occupy several slots, which is how a terrain weights it, so the number of *distinct*
+  weathers is ten or fewer.
+- **Each slot holds a day weather and an optional night weather.** Left empty, the day weather stands
+  through the dark — a blizzard at night is still a blizzard. Filled, a different registry entry takes
+  over during the dark watches, which is how a desert is scorching by day and freezing by night under
+  the same clear sky. The night entry is another weather with its own effects, not an inverse of the
+  day one.
+- **The variance belongs to the terrain, not to the weather type.** A clear sky is not inherently
+  freezing at night; it is freezing at night *in a desert*. Putting the day/night pair on the weather
+  type instead would need a separate entry per terrain and lose the reuse the registry exists for.
+- **The consumer declares which of the six watches are dark.** `evennia-calendar` reports the watch
+  and deliberately does not say which are night — "which of them are dark is the game's business, not
+  ours" — so the mapping is declared alongside the terrains and the effect keys.
+- **One weather draw per day**, the dusk swap being the only change within it. That is what keeps the
+  active weather a pure function of the day number, the terrain and a seed: nothing stored, nothing
+  to migrate, and every process in a multi-instance deployment computing the same answer without
+  coordinating. Drawing per watch would need stored state and would make the night slot meaningless.
+- **A room always has a weather.** Every slot is filled, so there is no null state and the library
+  never models an absence of weather.
+- **What a character gets is the terrain's effects and the active weather's, together.** Different
+  consumer systems read different keys out of that set, at whatever moment each of them runs.
+
 ## Open decisions
 
-What has to be settled before the surface it belongs to can be built. Each is a question raised in
+What has to be decided before the surface it belongs to can be built. Each is a question raised in
 the design conversation and left open, not a gap to be filled by whoever reads this next.
 
 **The effects registry**
@@ -193,16 +300,31 @@ the design conversation and left open, not a gap to be filled by whoever reads t
   worth refusing. Same question as the one above, from the room's side.]`
 - `[TBD — needs discussion: the accessor. Whether the keyed form is the whole API, or whether an
   all-effects form exists alongside it for a builder or debug command, and what both are called.]`
-- `[TBD — needs discussion: whether a terrain's effects vary by phase of day, as weather's do. The
-  desert case that forced per-phase payloads for weather may or may not reach terrain.]`
 
 **Weather**
 
-- `[TBD — needs discussion: how per-phase payloads sit against the calendar's six watches. The
-  exploration assumed four phases; the calendar shipped six, so either a terrain authors six payloads
-  or the unwritten ones inherit.]`
+- `[TBD — needs discussion: whether a weather's value for a key it shares with terrain overrides the
+  terrain's value or modifies it. Modify is the working lean — a blizzard ought to cost more in a
+  swamp than on a road — and the answer decides whether a weather's payload is flat numbers like
+  terrain's or carries operations. Nothing can be written for the weather registry until it is
+  answered.]`
+- `[TBD — needs discussion: whether `WeatherType.effects` is stored as something immutable. Freezing
+  the dataclass stops the attribute being rebound but not the mapping being mutated, and because
+  effects resolve at read time, mutating it would change every room using that weather with nothing
+  refusing it. WT-02 pins the frozen attribute, not the mapping's contents.]`
+- `[TBD — needs discussion: whether an empty-string `description` or `transition_in` is refused. It
+  has the same effect as `None` and probably means the author meant to write something, but refusing
+  it is a rule nobody has asked for yet.]`
+- `[TBD — needs discussion: how the active slot is chosen for a day. The ten slots are the candidate
+  table and the draw is once per day; the function from day number and terrain to a slot is not
+  designed. Note that weather keyed on `day_of_year` turns over at midnight, in the middle of the
+  dark watches — a weather-day offset from the calendar day is what puts the roll at dawn, and it
+  also decides whether a slot's night weather is the night after its day or the one before.]`
+- `[TBD — needs discussion: how the dark-watches declaration is shaped and where it sits — a setting,
+  or part of the consumer's declaration module alongside the terrains and effect keys.]`
 - `[TBD — needs discussion: whether mountains are their own region or a terrain-driven index shift
-  on a neighbouring one.]`
+  on a neighbouring one. The ten-slot structure has no region layer in it, so this may already be
+  answered by terrain keying the slots — but that has not been said.]`
 - `[TBD — needs discussion: whether exposure stays three tiers or becomes a scalar.]`
 
 **The library**

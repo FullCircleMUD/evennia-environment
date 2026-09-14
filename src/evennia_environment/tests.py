@@ -9,7 +9,11 @@ import dataclasses
 from unittest import TestCase
 
 import evennia_environment
-from evennia_environment import EnvironmentEffect, EnvironmentEffectRegistry
+from evennia_environment import (
+    EnvironmentEffectType,
+    EnvironmentEffectTypeRegistry,
+    WeatherType,
+)
 
 
 class ScaffoldTests(TestCase):
@@ -20,49 +24,53 @@ class ScaffoldTests(TestCase):
         self.assertEqual(evennia_environment.__version__, "0.0.1")
 
 
-class EffectConstructionTests(TestCase):
+class EffectTypeConstructionTests(TestCase):
     """EF-01 — EF-02. What a valid declaration gives back."""
 
     def test_ef_01_carries_its_key_datatype_and_default(self):
         """EF-01"""
-        effect = EnvironmentEffect(key="movement_cost", datatype=float, default=1.0)
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", datatype=float, default=1.0
+        )
 
-        self.assertEqual(effect.key, "movement_cost")
-        self.assertIs(effect.datatype, float)
-        self.assertEqual(effect.default, 1.0)
+        self.assertEqual(effect_type.key, "movement_cost")
+        self.assertIs(effect_type.datatype, float)
+        self.assertEqual(effect_type.default, 1.0)
 
     def test_ef_02_is_frozen(self):
         """EF-02"""
-        effect = EnvironmentEffect(key="movement_cost", datatype=float, default=1.0)
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", datatype=float, default=1.0
+        )
 
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            effect.default = 2.0
+            effect_type.default = 2.0
 
 
-class EffectKeyTests(TestCase):
-    """EF-03 — EF-04. The key names the effect, so it has to be a name."""
+class EffectTypeKeyTests(TestCase):
+    """EF-03 — EF-04. The key names the effect type, so it has to be a name."""
 
     def test_ef_03_refuses_a_key_that_is_not_a_string(self):
         """EF-03"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key=42, datatype=float, default=1.0)
+            EnvironmentEffectType(key=42, datatype=float, default=1.0)
 
     def test_ef_04_refuses_an_empty_key(self):
         """EF-04"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key="", datatype=float, default=1.0)
+            EnvironmentEffectType(key="", datatype=float, default=1.0)
 
 
-class EffectDatatypeTests(TestCase):
+class EffectTypeDatatypeTests(TestCase):
     """EF-05. The datatype is a type, not the name of one."""
 
     def test_ef_05_refuses_a_datatype_that_is_not_a_type(self):
         """EF-05"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key="movement_cost", datatype="float", default=1.0)
+            EnvironmentEffectType(key="movement_cost", datatype="float", default=1.0)
 
 
-class EffectDefaultTests(TestCase):
+class EffectTypeDefaultTests(TestCase):
     """EF-06 — EF-11. The default is checked against the declared datatype.
 
     ``isinstance`` and nothing more: no coercion, no widening, no truncation.
@@ -71,40 +79,44 @@ class EffectDefaultTests(TestCase):
 
     def test_ef_06_accepts_a_default_of_the_declared_type(self):
         """EF-06"""
-        effect = EnvironmentEffect(key="movement_cost", datatype=float, default=2.5)
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", datatype=float, default=2.5
+        )
 
-        self.assertEqual(effect.default, 2.5)
-        self.assertIsInstance(effect.default, float)
+        self.assertEqual(effect_type.default, 2.5)
+        self.assertIsInstance(effect_type.default, float)
 
     def test_ef_07_refuses_a_default_of_an_unrelated_type(self):
         """EF-07"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key="movement_cost", datatype=float, default="fast")
+            EnvironmentEffectType(key="movement_cost", datatype=float, default="fast")
 
     def test_ef_08_refuses_an_int_default_for_a_float_datatype(self):
         """EF-08"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key="movement_cost", datatype=float, default=1)
+            EnvironmentEffectType(key="movement_cost", datatype=float, default=1)
 
     def test_ef_09_refuses_a_float_default_for_an_int_datatype(self):
         """EF-09"""
         with self.assertRaises(ValueError):
-            EnvironmentEffect(key="crowding", datatype=int, default=2.5)
+            EnvironmentEffectType(key="crowding", datatype=int, default=2.5)
 
     def test_ef_10_accepts_a_bool_default_for_an_int_datatype(self):
         """EF-10"""
-        effect = EnvironmentEffect(key="crowding", datatype=int, default=True)
+        effect_type = EnvironmentEffectType(key="crowding", datatype=int, default=True)
 
-        self.assertIs(effect.default, True)
+        self.assertIs(effect_type.default, True)
 
     def test_ef_11_accepts_a_none_default_whatever_the_datatype(self):
         """EF-11"""
-        effect = EnvironmentEffect(key="movement_cost", datatype=float, default=None)
+        effect_type = EnvironmentEffectType(
+            key="movement_cost", datatype=float, default=None
+        )
 
-        self.assertIsNone(effect.default)
+        self.assertIsNone(effect_type.default)
 
 
-class EffectRefusalTests(TestCase):
+class EffectTypeRefusalTests(TestCase):
     """EF-12. Every refusal is one exception class, and it names the key."""
 
     def test_ef_12_every_refusal_is_a_value_error_naming_the_key(self):
@@ -119,94 +131,210 @@ class EffectRefusalTests(TestCase):
         for declaration in bad_declarations:
             with self.subTest(declaration=declaration):
                 with self.assertRaises(ValueError) as caught:
-                    EnvironmentEffect(**declaration)
+                    EnvironmentEffectType(**declaration)
                 # A key that is not a string still has to appear, so the
                 # consumer can find the declaration that is wrong.
                 self.assertIn(str(declaration["key"]), str(caught.exception))
 
 
-MOVEMENT_COST = EnvironmentEffect(key="movement_cost", datatype=float, default=1.0)
+MOVEMENT_COST = EnvironmentEffectType(key="movement_cost", datatype=float, default=1.0)
 
 
-class EffectRegistryTests(TestCase):
+class EffectTypeRegistryTests(TestCase):
     """ER-01 — ER-03, ER-11. Registering, and reading back what was registered.
 
     Every case builds its own registry rather than touching the module-level
-    ``ENVIRONMENT_EFFECTS``, so nothing leaks between runs.
+    ``ENVIRONMENT_EFFECT_TYPES``, so nothing leaks between runs.
     """
 
-    def test_er_01_a_registered_effect_is_returned_by_its_key(self):
+    def test_er_01_a_registered_effect_type_is_returned_by_its_key(self):
         """ER-01"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
         registry.register(MOVEMENT_COST)
 
         self.assertIs(registry.get("movement_cost"), MOVEMENT_COST)
 
-    def test_er_02_refuses_something_that_is_not_an_effect(self):
+    def test_er_02_refuses_something_that_is_not_an_effect_type(self):
         """ER-02"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
 
-        for not_an_effect in ("movement_cost", {"movement_cost": 1.0}, None):
-            with self.subTest(value=not_an_effect):
+        for not_an_effect_type in ("movement_cost", {"movement_cost": 1.0}, None):
+            with self.subTest(value=not_an_effect_type):
                 with self.assertRaises(ValueError):
-                    registry.register(not_an_effect)
+                    registry.register(not_an_effect_type)
 
     def test_er_03_a_fresh_registry_has_nothing_registered(self):
         """ER-03"""
-        self.assertIsNone(EnvironmentEffectRegistry().get("movement_cost"))
+        self.assertIsNone(EnvironmentEffectTypeRegistry().get("movement_cost"))
 
     def test_er_11_an_unregistered_key_returns_none(self):
         """ER-11"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
         registry.register(MOVEMENT_COST)
 
         self.assertIsNone(registry.get("health_effect"))
 
 
-class EffectRegistryDuplicateTests(TestCase):
+class EffectTypeRegistryDuplicateTests(TestCase):
     """ER-04 — ER-06. One key, one declaration."""
 
-    def test_er_04_refuses_a_different_effect_under_a_taken_key(self):
+    def test_er_04_refuses_a_different_effect_type_under_a_taken_key(self):
         """ER-04"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
         registry.register(MOVEMENT_COST)
 
         with self.assertRaises(ValueError):
             registry.register(
-                EnvironmentEffect(key="movement_cost", datatype=int, default=1)
+                EnvironmentEffectType(key="movement_cost", datatype=int, default=1)
             )
 
-    def test_er_05_accepts_an_identical_effect_registered_twice(self):
+    def test_er_05_accepts_an_identical_effect_type_registered_twice(self):
         """ER-05"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
         registry.register(MOVEMENT_COST)
         registry.register(
-            EnvironmentEffect(key="movement_cost", datatype=float, default=1.0)
+            EnvironmentEffectType(key="movement_cost", datatype=float, default=1.0)
         )
 
         self.assertEqual(registry.get("movement_cost"), MOVEMENT_COST)
 
     def test_er_06_the_duplicate_refusal_names_the_key(self):
         """ER-06"""
-        registry = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
         registry.register(MOVEMENT_COST)
 
         with self.assertRaises(ValueError) as caught:
             registry.register(
-                EnvironmentEffect(key="movement_cost", datatype=int, default=1)
+                EnvironmentEffectType(key="movement_cost", datatype=int, default=1)
             )
 
         self.assertIn("movement_cost", str(caught.exception))
 
 
-class EffectRegistryIsolationTests(TestCase):
+class EffectTypeRegistryIsolationTests(TestCase):
     """ER-10. The store is per-instance, not a mutable class attribute."""
 
     def test_er_10_two_registries_do_not_share_state(self):
         """ER-10"""
-        registry = EnvironmentEffectRegistry()
-        other = EnvironmentEffectRegistry()
+        registry = EnvironmentEffectTypeRegistry()
+        other = EnvironmentEffectTypeRegistry()
 
         registry.register(MOVEMENT_COST)
 
         self.assertIsNone(other.get("movement_cost"))
+
+
+# A weather is never built at module scope here: every case constructs its own,
+# so a refusal cannot take the whole suite down at import time.
+BLIZZARD_DESCRIPTION = "Snow drives across the ridge in sheets."
+BLIZZARD_TRANSITION = "The wind rises, and the snow begins to drive."
+
+
+class WeatherTypeConstructionTests(TestCase):
+    """WT-01 — WT-02. What a valid declaration gives back."""
+
+    def test_wt_01_carries_its_key_effects_and_both_strings(self):
+        """WT-01"""
+        weather = WeatherType(
+            key="blizzard",
+            effects={"movement_cost": 2.5},
+            description=BLIZZARD_DESCRIPTION,
+            transition_in=BLIZZARD_TRANSITION,
+        )
+
+        self.assertEqual(weather.key, "blizzard")
+        self.assertEqual(weather.effects, {"movement_cost": 2.5})
+        self.assertEqual(weather.description, BLIZZARD_DESCRIPTION)
+        self.assertEqual(weather.transition_in, BLIZZARD_TRANSITION)
+
+    def test_wt_02_is_frozen(self):
+        """WT-02"""
+        weather = WeatherType(key="blizzard", effects={})
+
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            weather.key = "thunderstorm"
+
+
+class WeatherTypeKeyTests(TestCase):
+    """WT-03 — WT-04. The key names the weather, so it has to be a name.
+
+    Nothing constrains it beyond being a non-empty string — a space is legal,
+    as it is for an effect key. The key is a mapping handle and a player never
+    sees it.
+    """
+
+    def test_wt_03_refuses_a_key_that_is_not_a_string(self):
+        """WT-03"""
+        with self.assertRaises(ValueError):
+            WeatherType(key=42, effects={})
+
+    def test_wt_04_refuses_an_empty_key(self):
+        """WT-04"""
+        with self.assertRaises(ValueError):
+            WeatherType(key="", effects={})
+
+
+class WeatherTypeEffectsTests(TestCase):
+    """WT-05 — WT-06. The mapping's presence and shape, not its contents.
+
+    What a value looks like turns on whether weather overrides terrain's value
+    or modifies it, which is open — see docs/test-plan.md § Open decisions.
+    """
+
+    def test_wt_05_accepts_an_empty_effects_mapping(self):
+        """WT-05"""
+        weather = WeatherType(key="sunny_with_some_clouds", effects={})
+
+        self.assertEqual(weather.effects, {})
+
+    def test_wt_06_refuses_effects_that_are_not_a_mapping(self):
+        """WT-06"""
+        not_mappings = ([("movement_cost", 2.5)], "movement_cost", None, 2.5)
+
+        for not_a_mapping in not_mappings:
+            with self.subTest(effects=not_a_mapping):
+                with self.assertRaises(ValueError):
+                    WeatherType(key="blizzard", effects=not_a_mapping)
+
+
+class WeatherTypeStringTests(TestCase):
+    """WT-07 — WT-09. Two optional strings the library only carries."""
+
+    def test_wt_07_both_strings_default_to_none(self):
+        """WT-07"""
+        weather = WeatherType(key="blizzard", effects={})
+
+        self.assertIsNone(weather.description)
+        self.assertIsNone(weather.transition_in)
+
+    def test_wt_08_refuses_a_description_that_is_not_a_string(self):
+        """WT-08"""
+        with self.assertRaises(ValueError):
+            WeatherType(key="blizzard", effects={}, description=42)
+
+    def test_wt_09_refuses_a_transition_in_that_is_not_a_string(self):
+        """WT-09"""
+        with self.assertRaises(ValueError):
+            WeatherType(key="blizzard", effects={}, transition_in=42)
+
+
+class WeatherTypeRefusalTests(TestCase):
+    """WT-10. Every refusal is one exception class, and it names the key."""
+
+    def test_wt_10_every_refusal_is_a_value_error_naming_the_key(self):
+        """WT-10"""
+        bad_declarations = (
+            {"key": 42, "effects": {}},
+            {"key": "", "effects": {}},
+            {"key": "blizzard", "effects": [("movement_cost", 2.5)]},
+            {"key": "blizzard", "effects": {}, "description": 42},
+            {"key": "blizzard", "effects": {}, "transition_in": 42},
+        )
+
+        for declaration in bad_declarations:
+            with self.subTest(declaration=declaration):
+                with self.assertRaises(ValueError) as caught:
+                    WeatherType(**declaration)
+                # A key that is not a string still has to appear, so the
+                # consumer can find the declaration that is wrong.
+                self.assertIn(str(declaration["key"]), str(caught.exception))

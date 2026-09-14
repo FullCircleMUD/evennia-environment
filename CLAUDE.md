@@ -27,9 +27,9 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**The effects vocabulary is built; terrain and weather are not.** `EnvironmentEffect` and
-`ENVIRONMENT_EFFECTS` — the shape a consumer declares one effect key in, and the list they declare it
-to — are done and tested. Everything else is open:
+**The effects vocabulary is built; terrain and weather are not.** `EnvironmentEffectType` and
+`ENVIRONMENT_EFFECT_TYPES` — the shape a consumer declares one effect type in, and the list they
+declare it to — are done and tested. Everything else is open:
 [docs/current-thinking-and-progress.md](docs/current-thinking-and-progress.md) is where a session
 picks the work up, and [docs/test-plan.md](docs/test-plan.md) carries the cases and the open
 decisions.
