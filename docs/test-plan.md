@@ -20,6 +20,7 @@ designed is in [Open decisions](#open-decisions) below.
 | `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
 | `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
+| `WS` | `WeatherSlot` — one of a terrain's ten slots, day and night |
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
 | `TP` | `TerrainProperty` — the attribute a room's terrain is held in |
 
@@ -317,24 +318,113 @@ they are for an effect key — the key is a mapping handle, and a player sees `d
 |---|---|---|
 | WT-10 | Every refusal is a `ValueError` naming the key, as every `EnvironmentEffectType` refusal is | `test_wt_10_every_refusal_is_a_value_error_naming_the_key` |
 
-## TT — `TerrainType`
+## WS — `WeatherSlot(day, night)`
 
-**A placeholder, deliberately.** It carries no fields yet. It exists so the room mixin can hold a
-real class from the start and validate against it, rather than accepting a string now and being
-retrofitted later when the fields are agreed.
+One of a terrain's ten slots. It holds the weather that occurs there, and optionally a different one
+for the dark watches.
 
-What it will carry is in [Current thinking](#current-thinking) — the terrain's own environment
-effects, always in force, and its ten numbered weather slots. None of that is designed, and no case
-below anticipates it. Cases land here as each field is agreed, the same as everywhere else.
+```python
+WeatherSlot(SCORCHING, night=FREEZING_CLEAR)   # a desert
+WeatherSlot(BLIZZARD)                          # a blizzard is a blizzard
+```
 
-It is a frozen dataclass like the other declaration classes, decided now rather than later: adding a
-field to a frozen class is nothing, while discovering a mutable one after rooms hold it is a change
-to something already in use.
+**`night` is filled with `day` at construction when it is not given.** Both are always populated, so
+nothing downstream tests for absence — whatever resolves the active weather asks for one or the other
+and gets a weather type either way. It also makes "does this slot differ at night" answerable as
+`slot.night is slot.day`, with no flag to carry.
 
 | ID | Case | Test function |
 |---|---|---|
-| TT-01 | A terrain type can be constructed, and is importable from the package | `test_tt_01_a_terrain_type_can_be_constructed` |
-| TT-02 | The instance is frozen — assigning any attribute raises, before there is a field to assign to | `test_tt_02_is_frozen` |
+| WS-01 | A slot carries the day and night weather it was given, unchanged | `test_ws_01_carries_its_day_and_night` |
+| WS-02 | Night not given is filled with the day weather, and is the same object | `test_ws_02_night_defaults_to_the_day_weather` |
+| WS-03 | The instance is frozen — assigning to a field after construction raises | `test_ws_03_is_frozen` |
+| WS-04 | A day that is not a `WeatherType` is refused | `test_ws_04_refuses_a_day_that_is_not_a_weather_type` |
+| WS-05 | A night that is not a `WeatherType` is refused | `test_ws_05_refuses_a_night_that_is_not_a_weather_type` |
+
+## TT — `TerrainType(key, effects, weather_slots, description)`
+
+What a consumer declares one terrain as: its own effects, always in force, the ten weather slots
+that can occur in it, and an optional description.
+
+```python
+scorch = WeatherSlot(SCORCHING, night=FREEZING_CLEAR)
+
+TerrainType(
+    key="desert",
+    description="Dunes run to the horizon, and the air shimmers above them.",
+    effects=(EnvironmentEffect(MOVE_COST, Constant(1.5)),),
+    weather_slots={
+        1: scorch, 2: scorch, 3: scorch, 4: scorch, 5: scorch,
+        6: CLEAR, 7: CLEAR, 8: CLEAR, 9: SANDSTORM, 10: SANDSTORM,
+    },
+)
+```
+
+**Exactly ten slots, keyed 1 to 10.** Not nine, not eleven, no gaps. A terrain with no weather —
+a cavern, an interior — declares ten of whatever its still air is called. Counting from one matches
+`evennia-calendar`, which counts every position from one.
+
+**The same weather in several slots is how a terrain weights it**, so the number of distinct weathers
+is ten or fewer.
+
+**A bare `WeatherType` is accepted as a slot value and wrapped.** A terrain with no day/night
+difference never meets `WeatherSlot`. Wrapping inside the declaration is also what stops a consumer
+writing `OVERCAST = WeatherSlot(OVERCAST)`, which rebinds the name and loses the weather type behind
+it.
+
+**Declared as a dict, stored as a tuple in slot order** — the same in-one-form, out-another as
+`WeatherType.effects`, and for the same reason: a dict in a frozen dataclass is mutable, and mutating
+it would change every room of that terrain at read time.
+
+**Effects follow the same rule as a weather's** — a tuple of `EnvironmentEffect`, at most one per
+effect type, through the shared check. A terrain declares only what it wants different from the
+default.
+
+### Construction
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-01 | A valid terrain carries its key, description, effects and ten slots unchanged | `test_tt_01_carries_its_key_description_effects_and_slots` |
+| TT-02 | The instance is frozen — assigning to a field after construction raises | `test_tt_02_is_frozen` |
+
+### The key
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-03 | A key that is not a string is refused | `test_tt_03_refuses_a_key_that_is_not_a_string` |
+| TT-04 | An empty key is refused | `test_tt_04_refuses_an_empty_key` |
+
+### The effects
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-05 | A terrain declaring no effects is accepted, and `effects` defaults to empty | `test_tt_05_accepts_a_terrain_declaring_no_effects` |
+| TT-06 | The shared effects rule is applied here too — an entry that is not an `EnvironmentEffect` is refused, and so is a second effect for one effect type. The rule is pinned by the `WT` cases; this proves it runs for terrain as well | `test_tt_06_applies_the_shared_effects_rule` |
+
+### The weather slots
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-07 | Slot keys must be exactly 1 to 10 — nine, eleven, a gap, a zero and a key that is not an integer are each refused, saying which slot is wrong | `test_tt_07_refuses_slot_keys_that_are_not_one_to_ten` |
+| TT-08 | A bare `WeatherType` as a slot value is wrapped into a `WeatherSlot` | `test_tt_08_wraps_a_bare_weather_type_in_a_slot` |
+| TT-09 | A slot value that is neither a `WeatherSlot` nor a `WeatherType` is refused | `test_tt_09_refuses_a_slot_that_is_neither_slot_nor_weather` |
+| TT-10 | Slots are stored as a tuple in slot order, so what a terrain holds cannot be mutated | `test_tt_10_stores_the_slots_as_a_tuple_in_slot_order` |
+
+### The description
+
+Opaque, like a weather's. The library stores it and hands it back; it never renders it and never
+decides when it is shown.
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-12 | The description defaults to `None` when the consumer declares none | `test_tt_12_description_defaults_to_none` |
+| TT-13 | A description that is not a string is refused | `test_tt_13_refuses_a_description_that_is_not_a_string` |
+
+### The refusal
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-11 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration | `test_tt_11_every_refusal_is_a_value_error_naming_the_key` |
 
 ## TP — `TerrainProperty`
 

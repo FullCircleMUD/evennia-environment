@@ -18,6 +18,7 @@ from evennia_environment import (
     EnvironmentEffectType,
     EnvironmentEffectTypeRegistry,
     TerrainType,
+    WeatherSlot,
     WeatherType,
 )
 
@@ -486,25 +487,236 @@ class WeatherTypeRefusalTests(TestCase):
                 self.assertIn(str(declaration["key"]), str(caught.exception))
 
 
-class TerrainTypeTests(TestCase):
-    """TT-01 — TT-02. The placeholder the room mixin will validate against.
+class WeatherSlotTests(TestCase):
+    """WS-01 — WS-05. One slot: what occurs there, day and night.
 
-    It has no fields yet. These two cases exist so the class is real and frozen
-    before anything holds one; the rest land as fields are agreed.
+    Weather types are built inside each case rather than at module scope, so a
+    refusal cannot take the whole suite down at import time.
     """
 
-    def test_tt_01_a_terrain_type_can_be_constructed(self):
+    def test_ws_01_carries_its_day_and_night(self):
+        """WS-01"""
+        day = WeatherType(key="scorching")
+        night = WeatherType(key="freezing_clear")
+
+        slot = WeatherSlot(day, night=night)
+
+        self.assertIs(slot.day, day)
+        self.assertIs(slot.night, night)
+
+    def test_ws_02_night_defaults_to_the_day_weather(self):
+        """WS-02"""
+        day = WeatherType(key="blizzard")
+
+        slot = WeatherSlot(day)
+
+        # The same object, not an equal one: it is what makes "does this slot
+        # differ at night" answerable as slot.night is slot.day.
+        self.assertIs(slot.night, day)
+        self.assertIs(slot.night, slot.day)
+
+    def test_ws_03_is_frozen(self):
+        """WS-03"""
+        slot = WeatherSlot(WeatherType(key="blizzard"))
+
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            slot.day = WeatherType(key="clear")
+
+    def test_ws_04_refuses_a_day_that_is_not_a_weather_type(self):
+        """WS-04"""
+        for not_a_weather in ("blizzard", 42, None):
+            with self.subTest(day=not_a_weather):
+                with self.assertRaises(ValueError):
+                    WeatherSlot(not_a_weather)
+
+    def test_ws_05_refuses_a_night_that_is_not_a_weather_type(self):
+        """WS-05"""
+        day = WeatherType(key="scorching")
+
+        for not_a_weather in ("freezing_clear", 42):
+            with self.subTest(night=not_a_weather):
+                with self.assertRaises(ValueError):
+                    WeatherSlot(day, night=not_a_weather)
+
+
+def _ten_slots(**overrides):
+    """Ten filled slots, so a case can change one and leave the rest valid.
+
+    Keys arrive as ``slot_1`` and so on because a keyword cannot be a number.
+    """
+    slots = {n: WeatherType(key=f"weather_{n}") for n in range(1, 11)}
+    for name, value in overrides.items():
+        slots[int(name.removeprefix("slot_"))] = value
+    return slots
+
+
+class TerrainTypeConstructionTests(TestCase):
+    """TT-01 — TT-02. What a valid declaration gives back."""
+
+    def test_tt_01_carries_its_key_description_effects_and_slots(self):
         """TT-01"""
-        self.assertIsInstance(TerrainType(), TerrainType)
+        effects = (EnvironmentEffect(MOVEMENT_COST, _constant(1.5)),)
+        slots = {n: WeatherSlot(WeatherType(key=f"weather_{n}")) for n in range(1, 11)}
+
+        terrain = TerrainType(
+            key="desert",
+            description="Dunes run to the horizon.",
+            effects=effects,
+            weather_slots=slots,
+        )
+
+        self.assertEqual(terrain.key, "desert")
+        self.assertEqual(terrain.description, "Dunes run to the horizon.")
+        self.assertEqual(terrain.effects, effects)
+        self.assertEqual(terrain.weather_slots, tuple(slots[n] for n in range(1, 11)))
 
     def test_tt_02_is_frozen(self):
         """TT-02"""
-        terrain_type = TerrainType()
+        terrain = TerrainType(key="desert", weather_slots=_ten_slots())
 
-        # Frozen blocks every attribute, not only declared fields, so this
-        # holds before there is a field to assign to.
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            terrain_type.key = "swamp"
+            terrain.key = "swamp"
+
+
+class TerrainTypeKeyTests(TestCase):
+    """TT-03 — TT-04. The key names the terrain, so it has to be a name."""
+
+    def test_tt_03_refuses_a_key_that_is_not_a_string(self):
+        """TT-03"""
+        with self.assertRaises(ValueError):
+            TerrainType(key=42, weather_slots=_ten_slots())
+
+    def test_tt_04_refuses_an_empty_key(self):
+        """TT-04"""
+        with self.assertRaises(ValueError):
+            TerrainType(key="", weather_slots=_ten_slots())
+
+
+class TerrainTypeEffectsTests(TestCase):
+    """TT-05 — TT-06. The same effects rule a weather follows."""
+
+    def test_tt_05_accepts_a_terrain_declaring_no_effects(self):
+        """TT-05"""
+        terrain = TerrainType(key="desert", weather_slots=_ten_slots())
+
+        self.assertEqual(terrain.effects, ())
+
+    def test_tt_06_applies_the_shared_effects_rule(self):
+        """TT-06"""
+        bad_effects = (
+            ("movement_cost",),
+            (
+                EnvironmentEffect(MOVEMENT_COST, _constant(1.5)),
+                EnvironmentEffect(MOVEMENT_COST, _constant(2.0)),
+            ),
+        )
+
+        for effects in bad_effects:
+            with self.subTest(effects=effects):
+                with self.assertRaises(ValueError):
+                    TerrainType(
+                        key="desert", effects=effects, weather_slots=_ten_slots()
+                    )
+
+
+class TerrainTypeWeatherSlotTests(TestCase):
+    """TT-07 — TT-10. Exactly ten slots, keyed one to ten."""
+
+    def test_tt_07_refuses_slot_keys_that_are_not_one_to_ten(self):
+        """TT-07"""
+        nine = _ten_slots()
+        del nine[10]
+
+        eleven = _ten_slots()
+        eleven[11] = WeatherType(key="weather_11")
+
+        gap = _ten_slots()
+        del gap[4]
+        gap[0] = WeatherType(key="weather_0")
+
+        not_an_integer = _ten_slots()
+        del not_an_integer[1]
+        not_an_integer["1"] = WeatherType(key="weather_1")
+
+        for slots in (nine, eleven, gap, not_an_integer, {}):
+            with self.subTest(keys=sorted(map(str, slots))):
+                with self.assertRaises(ValueError):
+                    TerrainType(key="desert", weather_slots=slots)
+
+    def test_tt_08_wraps_a_bare_weather_type_in_a_slot(self):
+        """TT-08"""
+        blizzard = WeatherType(key="blizzard")
+
+        terrain = TerrainType(
+            key="mountains", weather_slots=_ten_slots(slot_1=blizzard)
+        )
+
+        first = terrain.weather_slots[0]
+        self.assertIsInstance(first, WeatherSlot)
+        self.assertIs(first.day, blizzard)
+        self.assertIs(first.night, blizzard)
+
+    def test_tt_09_refuses_a_slot_that_is_neither_slot_nor_weather(self):
+        """TT-09"""
+        for not_a_slot in ("blizzard", 42, None):
+            with self.subTest(slot=not_a_slot):
+                with self.assertRaises(ValueError):
+                    TerrainType(
+                        key="desert", weather_slots=_ten_slots(slot_3=not_a_slot)
+                    )
+
+    def test_tt_10_stores_the_slots_as_a_tuple_in_slot_order(self):
+        """TT-10"""
+        # Declared out of order, so the ordering is proved rather than inherited
+        # from how the literal happened to be written.
+        slots = {n: WeatherType(key=f"weather_{n}") for n in reversed(range(1, 11))}
+
+        terrain = TerrainType(key="desert", weather_slots=slots)
+
+        self.assertIsInstance(terrain.weather_slots, tuple)
+        self.assertEqual(
+            [slot.day.key for slot in terrain.weather_slots],
+            [f"weather_{n}" for n in range(1, 11)],
+        )
+
+
+class TerrainTypeDescriptionTests(TestCase):
+    """TT-12 — TT-13. One optional string the library only carries."""
+
+    def test_tt_12_description_defaults_to_none(self):
+        """TT-12"""
+        terrain = TerrainType(key="desert", weather_slots=_ten_slots())
+
+        self.assertIsNone(terrain.description)
+
+    def test_tt_13_refuses_a_description_that_is_not_a_string(self):
+        """TT-13"""
+        with self.assertRaises(ValueError):
+            TerrainType(key="desert", weather_slots=_ten_slots(), description=42)
+
+
+class TerrainTypeRefusalTests(TestCase):
+    """TT-11. Every refusal is one exception class, and it names the key."""
+
+    def test_tt_11_every_refusal_is_a_value_error_naming_the_key(self):
+        """TT-11"""
+        bad_declarations = (
+            {"key": 42, "weather_slots": _ten_slots()},
+            {"key": "", "weather_slots": _ten_slots()},
+            {"key": "desert", "weather_slots": {}},
+            {"key": "desert", "weather_slots": _ten_slots(), "description": 42},
+            {
+                "key": "desert",
+                "weather_slots": _ten_slots(),
+                "effects": ("movement_cost",),
+            },
+        )
+
+        for declaration in bad_declarations:
+            with self.subTest(key=declaration["key"]):
+                with self.assertRaises(ValueError) as caught:
+                    TerrainType(**declaration)
+                self.assertIn(str(declaration["key"]), str(caught.exception))
 
 
 class TerrainPropertyTests(DjangoTestCase):

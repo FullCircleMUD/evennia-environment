@@ -25,6 +25,45 @@ from evennia_environment.effects import one_effect_per_type
 
 
 @dataclass(frozen=True)
+class WeatherSlot:
+    """One of a terrain's ten slots: what occurs there, day and night.
+
+    See docs/test-plan.md § WS.
+    """
+
+    day: "WeatherType"
+    night: Optional["WeatherType"] = None
+
+    def __post_init__(self):
+        """Refuse a slot that cannot be used, and fill night from day.
+
+        Filling ``night`` here rather than leaving it ``None`` is what keeps
+        the rest of the library free of absence checks: whatever resolves the
+        active weather asks for day or night and gets a weather type either
+        way. It also makes "does this slot differ at night" answerable as
+        ``slot.night is slot.day``, with no flag to carry.
+        """
+        if not isinstance(self.day, WeatherType):
+            raise ValueError(
+                f"WeatherSlot was given {self.day!r} as its day weather, which "
+                f"is a {type(self.day).__name__} rather than a WeatherType. "
+                f"Pass the declared weather itself, not its key."
+            )
+
+        if self.night is None:
+            object.__setattr__(self, "night", self.day)
+            return
+
+        if not isinstance(self.night, WeatherType):
+            raise ValueError(
+                f"WeatherSlot for {self.day.key!r} was given {self.night!r} as "
+                f"its night weather, which is a {type(self.night).__name__} "
+                f"rather than a WeatherType. Leave it out for a slot that does "
+                f"not change after dark."
+            )
+
+
+@dataclass(frozen=True)
 class WeatherType:
     """One weather a consumer's game can have. See docs/test-plan.md § WT.
 
