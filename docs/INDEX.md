@@ -31,4 +31,6 @@ that.
 ## Archive
 
 Historical context, not authoritative. Material in [archive/](archive/) is preserved per the
-"don't delete; supersede" principle. The archive is currently empty.
+"don't delete; supersede" principle. It also holds
+[archive/consumer-use-cases.md](archive/consumer-use-cases.md) — a running brainstorm of what a
+consumer wants to ask the library, agreed nowhere.
