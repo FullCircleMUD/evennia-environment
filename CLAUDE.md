@@ -14,39 +14,27 @@ permanent and weather that varies, both answering the same questions to whatever
 Tagline: **"What a room's surroundings do to whoever is standing in it."**
 
 **The library holds two contributors to one answer.** Terrain belongs to the room and never changes.
-Weather is derived from the calendar and varies by day, season and region. They share one vocabulary,
-so a call site asks for `movement_cost` once and does not care which of them supplied it.
+Weather is derived from the calendar and varies by day and season. They share one vocabulary, so a
+call site asks for `move_cost` once and does not care which of them supplied it.
 
-**The name was chosen against `evennia-terrain` and `evennia-weather` as separate libraries.** A
-terrain-only library is a registry, a lookup, a default and a mixin — not enough to carry the
-library-standards overhead. It could not live in FCM's game code either, because weather depends on it
-and weather has to stay game-agnostic. So both live here, terrain first. Do not reopen the split.
-
-For the big-picture overview, read [README.md](README.md).
-For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
+**Terrain and weather live in one library, not two.** A terrain-only library is a registry, a lookup,
+a default and a mixin — not enough to carry the library-standards overhead. It could not live in
+FCM's game code either, because weather depends on it and weather has to stay game-agnostic. Do not
+reopen the split.
 
 ## Project status
 
-**Feature complete, and untried against a real game.** A consumer declares their terrains, weathers
-and effect types in one module, adds one mixin to their room typeclass, and every room answers what
-its surroundings do. Every case in [docs/test-plan.md](docs/test-plan.md) has a test and
-every test traces to a case.
-
-[docs/design.md](docs/design.md) is how it is put together. [docs/installing.md](docs/installing.md)
-is what a consumer does, with a worked example at the bottom.
-
-What is open is in [docs/test-plan.md](docs/test-plan.md) § Open decisions — most of it weather
-refinement nothing has asked for yet.
+Feature complete as the requirements are currently understood, and expected to be improved
+iteratively as early development of the game uncovers more.
 
 ## Where to read first
 
-1. [docs/test-plan.md](docs/test-plan.md) — the cases the library commits to. **A behavioural change
-   starts here**, not in the code. **Start here.**
+1. [docs/test-plan.md](docs/test-plan.md) — the cases the library commits to, and § Open decisions for
+   what is unresolved. **A behavioural change starts here**, not in the code.
 2. [docs/design.md](docs/design.md) — how it is put together, and why.
 3. [docs/installing.md](docs/installing.md) — what a consumer declares, with a worked example.
-4. [README.md](README.md) — what the library is and its status.
-5. [docs/INDEX.md](docs/INDEX.md) — map of all design docs.
-6. [docs/interoperability.md](docs/interoperability.md) — this library against its siblings.
+
+[docs/INDEX.md](docs/INDEX.md) maps the rest.
 
 ## Load-bearing architectural principles
 
@@ -63,15 +51,18 @@ Every implementation decision must respect them.
    code. See [test-first-process.md](../../design/test-first-process.md) for the process and the
    rationale.
 
-4. **The consumer declares the vocabulary; the library never invents a key.** A game registers the
+4. **The consumer declares the vocabulary; the library never invents a key.** A game declares the
    effect keys it will use and the default for each. Terrain and weather then supply values against
    those keys, and the game's own code reads them and decides what they mean. If a hit point ever
    appears in this library's tests, the boundary has leaked.
 
-5. **Everything is declarative — the consumer never hands the library a callable to run.** Declaring
-   the vocabulary and consuming the values are both the consumer's, and both are late-bound. What
-   sits between them is data the library can validate at boot and test exhaustively. A callable
-   inside the lookup would cost both, and nothing raised so far needs one.
+5. **A contribution is a callable the library routes, not a value it computes.** An effect holds
+   `f(value, **kwargs) -> value`. A declared number cannot express most of what a game wants —
+   natural light is terrain and the hour together — so the consumer writes the function and the
+   library never decides what a value means. The static case is a stock helper, so there is one shape
+   and one code path. Validation is what a declared value would have bought: the signature is checked
+   with `inspect` at the line declaring it, and the answer against the effect type's `return_type` at
+   every step of resolution.
 
 6. **Values are pulled, not pushed.** A call site asks the room what it contributes, at the moment it
    is already doing something. That is what lets movement price a room before entering it rather than
@@ -83,14 +74,11 @@ Every implementation decision must respect them.
 
 ## Out of scope
 
-Decided as questions arise. Rulings so far:
-
 - **Applying an effect.** The library returns a value. Deducting movement, dealing damage, dousing a
   torch and refusing a move are all the consumer's, and so is the tick that drives any of them.
-- **Equipment rust and spell-school modifiers.** Both were raised and rejected — rust is a nuisance
-  players route around, and spell-school weighting is a balance rabbit hole.
-- **Atmospheric prose as the point.** Weather carries messages, but a library that only prints them
-  is a script and a message table. The mechanical effect is the reason this exists.
+- **Atmospheric prose as the point.** Weather carries messages, but a library that only prints them is
+  a script and a message table. The mechanical effect is the reason this exists.
+- **Equipment rust and spell-school modifiers.** Both were rejected. Do not re-propose either.
 
 ## Working conventions
 
@@ -106,11 +94,36 @@ Decided as questions arise. Rulings so far:
 
 ## Documentation discipline (load-bearing)
 
+**Every sentence must help a developer understand how the library works, or help a consumer implement
+it. If it does neither, it does not go in.**
+
+That rules out **measurements** — test counts, coverage figures, how many consumers or call sites
+there are, how much is finished. Every one of them is wrong after the next commit, and none of them
+changes what a developer or a consumer does next.
+
+**Measurements have exactly one home: [docs/progress.md](docs/progress.md).** It is a cumulative,
+dated log, so a snapshot of where things stood on a given day is what belongs there and does not go
+stale — it was true when it was written and stays true as a record. Everywhere else, a number is a
+claim about now, and now moves.
+
+It does not rule out a **map**. The repository layout below is a file tree, and a file tree is how an
+agent knows what is in here without walking the directory. It goes stale only when a module is added
+or moved, and it earns that. The test is which of the two something is: a map of where things are, or
+a claim about how much or how far.
+
+**A section is as long as it has content for.** The nine standard sections are required; filling one
+out is not. A sentence is a complete section when a sentence is all there is to say, and bullets beat
+prose whenever the content is a list. Nothing is written to make a heading look inhabited.
+
+**What each surface is for.** `CLAUDE.md` and `docs/design.md` answer a developer, human or LLM:
+where things are, what they do, how they work and why they were built that way.
+[docs/installing.md](docs/installing.md) answers a consumer, and answers concretely — what to add to
+`INSTALLED_APPS`, every setting that has to be declared and what happens if it is not, what to do
+about the database if anything, and what the library does not check for them.
+
 Design documents in `docs/` must reflect decisions **actually discussed and agreed on with the project
 owner**. They are not a place to forward-design the system from first principles or extrapolate
 "reasonable defaults" from a starting point.
-
-**Rules:**
 
 1. **Only capture what was discussed and agreed.** If the conversation establishes a principle, do not
    extrapolate it into specifics that were not raised — effect key names, terrain lists, band counts,
@@ -133,49 +146,50 @@ evennia-environment/
 ├── LICENSE                    # BSD 3-Clause
 ├── pyproject.toml
 ├── runtests.py                # standalone test runner; no gamedir required
-├── .gitignore
-├── examples/                  # demo gamedirs for integration testing; empty so far
+├── examples/                  # demo gamedirs for integration testing
 ├── docs/                      # design wiki (humans + LLMs)
 │   ├── INDEX.md
 │   ├── design.md
 │   ├── installing.md
+│   ├── interoperability.md
 │   ├── progress.md
 │   ├── test-plan.md
-│   ├── interoperability.md
 │   └── archive/               # historical context, not authoritative
 ├── src/
 │   └── evennia_environment/   # library code (src layout)
-│       ├── __init__.py
+│       ├── __init__.py        # what a consumer imports: the declarations, the helpers, resolve()
+│       ├── apps.py            # AppConfig: runs the boot check, connects the calendar's signals
+│       ├── config.py          # the settings accessors, and check_settings()
+│       ├── effects.py         # EnvironmentEffectType and EnvironmentEffect
+│       ├── helpers.py         # the stock helpers — Constant, Add, Multiply, Round*, Chain
 │       ├── log.py             # binds environment_log via evennia-logging-extension
 │       ├── refusal.py         # the one route a refusal takes: log at ERROR, then raise
-│       └── tests.py           # unit tests, run via runtests.py
-└── tests/                     # standalone test infrastructure
-    ├── __init__.py
+│       ├── resolve.py         # default → terrain → weather, type-checked at every step
+│       ├── room.py            # TerrainProperty and EnvironmentRoomMixin; imports Evennia
+│       ├── terrain.py         # TerrainType
+│       ├── tests.py           # unit tests, run via runtests.py
+│       └── weather.py         # WeatherType, WeatherSlot, and the derived weather band
+└── tests/                     # standalone test infrastructure and fixture modules
     ├── test_settings.py
     └── urls.py
 ```
 
-No `contrib/` — nothing opt-in exists, and the standards forbid scaffolding one empty. A room mixin
-is the anticipated first candidate.
+`room.py` is not re-exported from `__init__.py`. It imports Evennia, and the package is imported
+while Django is still building its app registry, so a consumer takes the mixin from
+`evennia_environment.room` directly.
 
-`tests/test_settings.py` installs `evennia_calendar` alongside this library, because weather reads
-the season and the phase from it.
+No `contrib/` — the standards forbid scaffolding one empty.
 
 ## Tools and environment
 
-- Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: Evennia, `evennia-logging-extension`, `evennia-calendar`.
 - **Tests use Django's test runner** via `python runtests.py`, which bootstraps Django then calls
   `evennia._init()`, as the siblings do. Not pytest, and no gamedir required.
+- `tests/test_settings.py` installs `evennia_calendar` alongside this library, because weather reads
+  the season and the phase from it. The fixture modules beside it are the declarations a consumer
+  would write — a terrain enum, a terrain table, room typeclasses.
 - Development uses a dedicated venv at `venv/` (gitignored), independent of any consumer game.
 
 ## Sibling libraries to reference
 
-- **[../evennia-calendar/](../evennia-calendar/)** — a hard dependency, and the closest reference
-  shape for repo structure, the test runner and the docs surfaces. Its `season`, `phase` and
-  `season_changed` / `phase_changed` signals are what weather is built on.
-- **[../evennia-equipment/](../evennia-equipment/)** — the reference for consumer-declared
-  vocabulary: an enum in the consumer's own module, a setting pointing at it, the library validating
-  both sides against that one list. Terrain follows the same shape.
-- **[../evennia-survival/](../evennia-survival/)** — a likely consumer. Its meters are the mechanic
-  that would first read an environment effect.
+- **[../evennia-calendar/](../evennia-calendar/)** — a hard dependency. Its `season` and `phase`, and
+  its `day_changed` / `phase_changed` signals, are what weather is derived from.
