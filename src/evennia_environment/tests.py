@@ -16,9 +16,11 @@ from django.test import override_settings
 
 from evennia_environment.config import (
     PROBLEM_PREFIX,
+    SETTING_DARK_WATCHES,
     SETTING_TERRAIN_ENUM,
     SETTING_TERRAIN_TYPES,
     check_settings,
+    dark_watches,
     terrain_enum,
     terrain_types,
 )
@@ -37,7 +39,9 @@ from evennia_environment import (
     TerrainType,
     WeatherSlot,
     WeatherType,
+    current_weather,
     current_weather_band,
+    is_dark,
     resolve,
     weather_band,
 )
@@ -451,6 +455,114 @@ class CurrentWeatherBandTests(TestCase):
 
         self.assertIn(weather._held_band, range(3, 9))
         self.assertNotEqual(weather._held_band, 99)
+
+
+class IsDarkTests(TestCase):
+    """DN-01 — DN-05. Whether it is dark, held between watches."""
+
+    def setUp(self):
+        from evennia_environment import weather
+
+        dark_watches.cache_clear()
+        weather._held_dark = None
+        weather._held_phase = None
+
+    tearDown = setUp
+
+    def _at_watch(self, phase):
+        """Patch the calendar so a case can sit in a chosen watch."""
+        from evennia_environment import weather
+
+        return mock.patch.object(
+            weather, "game_date", return_value=mock.Mock(phase=phase)
+        )
+
+    def test_dn_01_a_declared_watch_is_dark(self):
+        """DN-01"""
+        # The suite declares (6, 1).
+        with self._at_watch(6):
+            self.assertIs(is_dark(), True)
+
+    def test_dn_02_a_watch_not_declared_is_light(self):
+        """DN-02"""
+        with self._at_watch(3):
+            self.assertIs(is_dark(), False)
+
+    def test_dn_03_a_read_with_nothing_held_works_it_out(self):
+        """DN-03"""
+        from evennia_environment import weather
+
+        with self._at_watch(1):
+            is_dark()
+
+        self.assertIsNotNone(weather._held_dark)
+
+    def test_dn_04_a_second_read_does_not_ask_the_calendar_again(self):
+        """DN-04"""
+        from evennia_environment import weather
+
+        with self._at_watch(1):
+            is_dark()
+
+        with mock.patch.object(
+            weather, "game_date", side_effect=AssertionError("asked again")
+        ):
+            self.assertIs(is_dark(), True)
+
+    def test_dn_05_phase_changed_refreshes_what_is_held(self):
+        """DN-05"""
+        from evennia_calendar.signals import phase_changed
+
+        from evennia_environment import weather
+
+        with self._at_watch(6):
+            is_dark()
+        self.assertIs(weather._held_dark, True)
+
+        with self._at_watch(3):
+            phase_changed.send(sender=None, previous=None, current=None)
+
+        self.assertIs(weather._held_dark, False)
+
+
+class CurrentWeatherTests(TestCase):
+    """WB-11 — WB-12. The weather the band names."""
+
+    def test_wb_11_the_band_names_the_slot(self):
+        """WB-11"""
+        from evennia_environment import weather
+        from tests.terrain_tables import MOUNTAINS
+
+        for band in range(1, 11):
+            with self.subTest(band=band):
+                with mock.patch.object(
+                    weather, "current_weather_band", return_value=band
+                ):
+                    found = current_weather(MOUNTAINS, dark=False)
+
+                # Slot 4 alone carries a different day weather.
+                expected = "scorching" if band == 4 else f"band_{band}"
+                self.assertEqual(found.key, expected)
+
+    def test_wb_12_dark_reads_the_slots_night_weather(self):
+        """WB-12"""
+        from evennia_environment import weather
+        from tests.terrain_tables import MOUNTAINS
+
+        with mock.patch.object(weather, "current_weather_band", return_value=4):
+            self.assertEqual(current_weather(MOUNTAINS, dark=False).key, "scorching")
+            self.assertEqual(
+                current_weather(MOUNTAINS, dark=True).key, "freezing_clear"
+            )
+
+            # A slot with no night declared answers the same either way.
+            with mock.patch.object(
+                weather, "current_weather_band", return_value=5
+            ):
+                self.assertEqual(
+                    current_weather(MOUNTAINS, dark=True).key,
+                    current_weather(MOUNTAINS, dark=False).key,
+                )
 
 
 MOVEMENT_COST = EnvironmentEffectType(
@@ -1177,6 +1289,7 @@ class ConfigTests(TestCase):
     def setUp(self):
         terrain_enum.cache_clear()
         terrain_types.cache_clear()
+        dark_watches.cache_clear()
 
     tearDown = setUp
 
@@ -1306,6 +1419,34 @@ class ConfigTests(TestCase):
         self.assertEqual(message.count(PROBLEM_PREFIX), 2)
         self.assertIn(SETTING_TERRAIN_TYPES, message)
 
+    def test_cf_15_refuses_absent_dark_watches(self):
+        """CF-15"""
+        message = self._refusal(None, setting=SETTING_DARK_WATCHES)
+
+        self.assertIn(SETTING_DARK_WATCHES, message)
+
+    def test_cf_16_refuses_dark_watches_that_are_not_watch_numbers(self):
+        """CF-16"""
+        for value in ("6,1", 6, ("Dog",)):
+            with self.subTest(value=value):
+                self.assertIn(
+                    SETTING_DARK_WATCHES,
+                    self._refusal(value, setting=SETTING_DARK_WATCHES),
+                )
+
+    def test_cf_17_refuses_a_watch_outside_one_to_six(self):
+        """CF-17"""
+        message = self._refusal((0, 7), setting=SETTING_DARK_WATCHES)
+
+        self.assertIn("0", message)
+        self.assertIn("7", message)
+
+    def test_cf_18_accepts_no_dark_watches_at_all(self):
+        """CF-18"""
+        # A game with no night is a correct reading; not declaring is not.
+        with override_settings(**{SETTING_DARK_WATCHES: ()}):
+            check_settings()
+
     def test_cf_09_a_valid_setting_resolves_to_the_enum(self):
         """CF-09"""
         from tests.terrain_enums import Terrain
@@ -1353,6 +1494,65 @@ class RoomTerrainDescriptionTests(DjangoTestCase):
         room.terrain = Terrain.MOUNTAINS
 
         self.assertIsNone(room.get_terrain_description())
+
+
+class RoomWeatherDescriptionTests(DjangoTestCase):
+    """RM-05 — RM-07, RM-09. What a room says about its weather."""
+
+    def _room(self, terrain=None):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        room = create_object(TerrainRoom, key="room", nohome=True)
+        if terrain is not None:
+            room.terrain = terrain
+        return room
+
+    def test_rm_05_returns_the_active_weathers_description(self):
+        """RM-05"""
+        from evennia_environment import weather
+        from tests.terrain_enums import Terrain
+
+        room = self._room(Terrain.MOUNTAINS)
+
+        # Band 4 is the slot that carries a description on both sides.
+        with mock.patch.object(weather, "current_weather_band", return_value=4):
+            with mock.patch.object(weather, "is_dark", return_value=False):
+                self.assertEqual(
+                    room.get_weather_description(), "The air shimmers."
+                )
+
+    def test_rm_06_day_false_forces_the_night_weather(self):
+        """RM-06"""
+        from evennia_environment import weather
+        from tests.terrain_enums import Terrain
+
+        room = self._room(Terrain.MOUNTAINS)
+
+        with mock.patch.object(weather, "current_weather_band", return_value=4):
+            # Light outside, and the argument overrides it anyway.
+            with mock.patch.object(weather, "is_dark", return_value=False):
+                self.assertEqual(
+                    room.get_weather_description(day=False), "The cold bites."
+                )
+
+    def test_rm_07_a_weather_with_no_description_returns_none(self):
+        """RM-07"""
+        from evennia_environment import weather
+        from tests.terrain_enums import Terrain
+
+        room = self._room(Terrain.MOUNTAINS)
+
+        # Slot 5 is a bare weather with no description, which is legal.
+        with mock.patch.object(weather, "current_weather_band", return_value=5):
+            with mock.patch.object(weather, "is_dark", return_value=False):
+                self.assertIsNone(room.get_weather_description())
+
+    def test_rm_09_a_room_with_no_terrain_has_no_weather(self):
+        """RM-09"""
+        # No terrain means no slot table to read a band against.
+        self.assertIsNone(self._room().get_weather_description())
 
 
 class TerrainPropertyTests(DjangoTestCase):

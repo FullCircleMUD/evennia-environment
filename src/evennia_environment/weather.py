@@ -197,6 +197,18 @@ def current_weather_band():
     return _held_band
 
 
+def game_date():
+    """Return the calendar's current date.
+
+    Wrapped rather than imported at module scope: importing it pulls Evennia
+    and reads settings, and this module is re-exported from ``__init__.py``,
+    which runs while Django is still building its app registry.
+    """
+    from evennia_calendar import game_date as _from_calendar
+
+    return _from_calendar()
+
+
 def refresh_weather_band(sender=None, **kwargs):
     """Recompute and hold today's band. Connected to ``day_changed``.
 
@@ -207,11 +219,68 @@ def refresh_weather_band(sender=None, **kwargs):
     """
     global _held_band, _held_day
 
-    from evennia_calendar import game_date
-
     from evennia_environment.config import weather_seed
 
     # One call: the date carries the day and the season both.
     date = game_date()
     _held_day = date.day_of_year
     _held_band = weather_band(date.day_of_year, date.season, weather_seed())
+
+
+#: Whether the current watch is dark, and the watch it was worked out for.
+#: Module state, rebuilt on the next watch or the next read.
+_held_dark = None
+_held_phase = None
+
+
+def is_dark():
+    """Return whether the current watch is one the consumer declared dark.
+
+    Held between watches: ``phase_changed`` refreshes it, and a read computes
+    it when nothing is held — which is what answers between a restart and the
+    next watch.
+    """
+    if _held_dark is None:
+        refresh_is_dark()
+
+    return _held_dark
+
+
+def refresh_is_dark(sender=None, **kwargs):
+    """Recompute and hold whether it is dark. Connected to ``phase_changed``.
+
+    One calculation, two triggers, as the band has: the signal when the clock
+    is running, and a read that finds nothing held.
+    """
+    global _held_dark, _held_phase
+
+    from evennia_environment.config import dark_watches
+
+    _held_phase = game_date().phase
+    _held_dark = _held_phase in dark_watches()
+
+
+def current_weather(terrain_type, dark=None):
+    """Return the weather in force for ``terrain_type``.
+
+    The band names the slot — both run 1 to 10 — and the slot answers with its
+    day or night weather.
+
+    Args:
+        terrain_type (TerrainType): the terrain whose slots to read.
+        dark (bool): forces night when true and day when false. Worked out
+            from the current watch when not given.
+
+    Returns:
+        WeatherType: the weather in force.
+    """
+    # The band is the slot number — both run 1 to 10 — so a terrain's slots
+    # are indexed by it directly and there is nothing to map.
+    slot = terrain_type.weather_slots[current_weather_band() - 1]
+
+    if dark is None:
+        dark = is_dark()
+
+    # Both are always populated: WeatherSlot fills night from day when none
+    # was declared, so this never has to test for absence.
+    return slot.night if dark else slot.day

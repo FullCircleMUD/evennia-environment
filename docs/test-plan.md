@@ -27,6 +27,7 @@ designed is in [Open decisions](#open-decisions) below.
 | `RS` | `resolve()` — what a key answers, given a terrain and a weather |
 | `CF` | The setting, and the boot check that refuses a bad one |
 | `WB` | The weather band — one number a day, for the whole game |
+| `DN` | Whether it is dark, held between watches |
 | `RM` | `EnvironmentRoomMixin` — what a room answers about its surroundings |
 
 ## Fixtures
@@ -647,6 +648,7 @@ The consumer's terrain enum reaches the library as a setting naming it:
 ```python
 ENVIRONMENT_TERRAIN_ENUM = "world.environment.Terrain"
 ENVIRONMENT_TERRAIN_TYPES = "world.environment.TERRAINS"
+ENVIRONMENT_DARK_WATCHES = (6, 1)
 ```
 
 **Two settings, one file.** The enum names the terrains a game has; `TERRAINS` is the collection of
@@ -686,6 +688,23 @@ moment to happen in.** Nothing does yet, and a setting with no consumer is a set
 | CF-05 | An enum with no members is accepted, alongside no terrain types — booting to check an install before writing content is a correct reading. An empty enum beside a populated table is a different thing, and CF-12 refuses it | `test_cf_05_accepts_an_enum_with_no_members` |
 | CF-06 | Duplicate values are refused, naming the members Python folded. `JUNGLE = "forest"` silently becomes a second name for `FOREST`, leaving the game a terrain short with nothing raised | `test_cf_06_refuses_duplicate_values` |
 | CF-07 | Values that are not strings are refused, naming them — a terrain's value is what a room stores and what YAML writes | `test_cf_07_refuses_values_that_are_not_strings` |
+
+### The dark watches
+
+Which of the calendar's six watches are dark. Numbers rather than names, because `PHASE_NAMES` are
+documented as placeholders a game is expected to replace, so a name-based setting breaks when
+someone renames them.
+
+There is no safe default — the calendar deliberately refuses to say which watches are dark, so the
+library cannot invent one either. Declaring an empty tuple is a game with no night, which is a
+correct reading; not declaring at all is not.
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-15 | The dark-watches setting absent is refused | `test_cf_15_refuses_absent_dark_watches` |
+| CF-16 | A setting that is not a collection of watch numbers is refused | `test_cf_16_refuses_dark_watches_that_are_not_watch_numbers` |
+| CF-17 | A watch number outside 1 to 6 is refused, naming it — the calendar has six | `test_cf_17_refuses_a_watch_outside_one_to_six` |
+| CF-18 | An empty tuple is accepted: a game with no night | `test_cf_18_accepts_no_dark_watches_at_all` |
 
 ### The terrain types
 
@@ -772,6 +791,15 @@ day/night weather slots are waiting on.]`
 | WB-09 | Summer shifts it up two, landing in 5 to 10 — the only season that reaches slots 9 and 10 | `test_wb_09_summer_shifts_the_band_up` |
 | WB-10 | Spring and autumn do not shift it, landing in 3 to 8, and give the same band as each other for a day | `test_wb_10_spring_and_autumn_do_not_shift_the_band` |
 
+### The weather it names
+
+The band is the slot number: both run 1 to 10, so a terrain's slots are indexed by it directly.
+
+| ID | Case | Test function |
+|---|---|---|
+| WB-11 | `current_weather` returns the weather in the slot the band names | `test_wb_11_the_band_names_the_slot` |
+| WB-12 | It returns the slot's night weather when it is dark and its day weather when it is not — which differ only where the slot declared a night | `test_wb_12_dark_reads_the_slots_night_weather` |
+
 ### Today's band
 
 | ID | Case | Test function |
@@ -779,6 +807,22 @@ day/night weather slots are waiting on.]`
 | WB-05 | A read with nothing held computes it — the lazy trigger, which is what answers between a restart and the next rollover | `test_wb_05_a_read_with_nothing_held_computes_it` |
 | WB-06 | A second read returns what is held without recomputing | `test_wb_06_a_second_read_does_not_recompute` |
 | WB-07 | `day_changed` refreshes what is held, so a rollover takes effect without anything asking the calendar | `test_wb_07_day_changed_refreshes_what_is_held` |
+
+## DN — whether it is dark
+
+Held between watches, the same shape as the band: `phase_changed` refreshes it, and a read computes
+it when nothing is held — which is what answers between a restart and the next watch.
+
+Nothing is stored in the database. Changing `ENVIRONMENT_DARK_WATCHES` and restarting is the whole
+operation; there is no history to fix up.
+
+| ID | Case | Test function |
+|---|---|---|
+| DN-01 | A watch the setting names is dark | `test_dn_01_a_declared_watch_is_dark` |
+| DN-02 | A watch it does not name is light | `test_dn_02_a_watch_not_declared_is_light` |
+| DN-03 | A read with nothing held works it out from the current watch | `test_dn_03_a_read_with_nothing_held_works_it_out` |
+| DN-04 | A second read returns what is held without asking the calendar again | `test_dn_04_a_second_read_does_not_ask_the_calendar_again` |
+| DN-05 | `phase_changed` refreshes what is held | `test_dn_05_phase_changed_refreshes_what_is_held` |
 
 ## RM — `EnvironmentRoomMixin`
 
@@ -806,9 +850,10 @@ the calendar itself.
 | RM-03 | `get_terrain_description` returns this terrain's description, found by matching the stored member's value against the declared terrain types' keys | `test_rm_03_returns_the_terrains_description` |
 | RM-04 | `get_terrain_description` on a room with no terrain returns `None` | `test_rm_04_a_room_with_no_terrain_has_no_description` |
 | RM-08 | `get_terrain_description` on a terrain declaring no description returns `None` rather than raising | `test_rm_08_a_terrain_with_no_description_returns_none` |
-| RM-05 | `get_weather_description` returns the active weather's description | |
-| RM-06 | `get_weather_description(day=False)` returns the night weather's description, which differs only where the slot declared one | |
-| RM-07 | A weather declaring no description returns `None` rather than raising | |
+| RM-05 | `get_weather_description` returns the active weather's description, working out the watch itself | `test_rm_05_returns_the_active_weathers_description` |
+| RM-06 | `get_weather_description(day=False)` forces the night weather, overriding the watch | `test_rm_06_day_false_forces_the_night_weather` |
+| RM-07 | A weather declaring no description returns `None` rather than raising | `test_rm_07_a_weather_with_no_description_returns_none` |
+| RM-09 | `get_weather_description` on a room with no terrain returns `None` — there is no slot table to read a band against | `test_rm_09_a_room_with_no_terrain_has_no_weather` |
 
 ## Current thinking
 

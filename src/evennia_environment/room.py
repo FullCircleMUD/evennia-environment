@@ -19,6 +19,9 @@ See docs/test-plan.md § TP.
 from evennia.typeclasses.attributes import AttributeProperty
 
 from evennia_environment.config import terrain_enum, terrain_types
+# Aliased: the mixin exposes a ``current_weather`` of its own, and two of
+# that name in one module reads as a mistake even where it is not.
+from evennia_environment.weather import current_weather as _weather_in_force
 
 
 class TerrainProperty(AttributeProperty):
@@ -153,11 +156,32 @@ class EnvironmentRoomMixin:
         terrain = self.terrain
         return None if terrain is None else terrain_types().get(terrain.value)
 
-    def get_weather_description(self, day=True):
+    def get_weather_description(self, day=None):
         """Return the active weather's description, or ``None``.
 
+        ``None`` for a room with no terrain — there is no slot table to read a
+        band against — and for a weather that declares no description. Both
+        are ordinary, so neither raises.
+
         Args:
-            day (bool): the day weather when true, the night one when false.
-                A stand-in until the library works out the watch itself.
+            day (bool): forces the day weather when true and the night one
+                when false. The current watch decides when it is not given.
         """
-        raise NotImplementedError
+        terrain = self.terrain_type
+        if terrain is None:
+            return None
+
+        # None leaves it to the watch; True and False override it.
+        dark = None if day is None else not day
+
+        return _weather_in_force(terrain, dark=dark).description
+
+    @property
+    def current_weather(self):
+        """Return the ``WeatherType`` in force here, or ``None``.
+
+        ``None`` only when the room has no terrain: the band names a slot,
+        every slot is filled, and both a slot's weathers are always populated.
+        """
+        terrain = self.terrain_type
+        return None if terrain is None else _weather_in_force(terrain)

@@ -18,10 +18,13 @@ class EnvironmentConfig(AppConfig):
     verbose_name = "Evennia Environment"
 
     def ready(self):
-        from evennia_calendar.signals import day_changed
+        from evennia_calendar.signals import day_changed, phase_changed
 
         from evennia_environment.config import check_settings
-        from evennia_environment.weather import refresh_weather_band
+        from evennia_environment.weather import (
+            refresh_is_dark,
+            refresh_weather_band,
+        )
 
         check_settings()
 
@@ -29,3 +32,4 @@ class EnvironmentConfig(AppConfig):
         # runs wherever the app starts — which is once per process, and again
         # after a reload, since a reload restarts the process.
         day_changed.connect(refresh_weather_band, dispatch_uid="environment_band")
+        phase_changed.connect(refresh_is_dark, dispatch_uid="environment_dark")

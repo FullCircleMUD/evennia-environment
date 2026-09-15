@@ -35,7 +35,9 @@ from evennia_environment.terrain import TerrainType
 from evennia_environment.weather import (
     WeatherSlot,
     WeatherType,
+    current_weather,
     current_weather_band,
+    is_dark,
     weather_band,
 )
 
@@ -55,7 +57,9 @@ __all__ = [
     "TerrainType",
     "WeatherSlot",
     "WeatherType",
+    "current_weather",
     "current_weather_band",
+    "is_dark",
     "resolve",
     "weather_band",
 ]
