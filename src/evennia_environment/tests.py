@@ -921,7 +921,7 @@ def _ten_slots(**overrides):
 
     Keys arrive as ``slot_1`` and so on because a keyword cannot be a number.
     """
-    slots = {n: WeatherType(key=f"weather_{n}") for n in range(1, 11)}
+    slots = {n: WeatherSlot(WeatherType(key=f"weather_{n}")) for n in range(1, 11)}
     for name, value in overrides.items():
         slots[int(name.removeprefix("slot_"))] = value
     return slots
@@ -1020,22 +1020,11 @@ class TerrainTypeWeatherSlotTests(TestCase):
                 with self.assertRaises(ValueError):
                     TerrainType(key="desert", weather_slots=slots)
 
-    def test_tt_08_wraps_a_bare_weather_type_in_a_slot(self):
-        """TT-08"""
-        blizzard = WeatherType(key="blizzard")
-
-        terrain = TerrainType(
-            key="mountains", weather_slots=_ten_slots(slot_1=blizzard)
-        )
-
-        first = terrain.weather_slots[0]
-        self.assertIsInstance(first, WeatherSlot)
-        self.assertIs(first.day, blizzard)
-        self.assertIs(first.night, blizzard)
-
-    def test_tt_09_refuses_a_slot_that_is_neither_slot_nor_weather(self):
+    def test_tt_09_refuses_a_slot_that_is_not_a_weather_slot(self):
         """TT-09"""
-        for not_a_slot in ("blizzard", 42, None):
+        # A WeatherType included: one shape, so a consumer never chooses
+        # between two classes on a condition.
+        for not_a_slot in (WeatherType(key="blizzard"), "blizzard", 42, None):
             with self.subTest(slot=not_a_slot):
                 with self.assertRaises(ValueError):
                     TerrainType(
@@ -1046,7 +1035,10 @@ class TerrainTypeWeatherSlotTests(TestCase):
         """TT-10"""
         # Declared out of order, so the ordering is proved rather than inherited
         # from how the literal happened to be written.
-        slots = {n: WeatherType(key=f"weather_{n}") for n in reversed(range(1, 11))}
+        slots = {
+            n: WeatherSlot(WeatherType(key=f"weather_{n}"))
+            for n in reversed(range(1, 11))
+        }
 
         terrain = TerrainType(key="desert", weather_slots=slots)
 
@@ -1098,7 +1090,7 @@ class TerrainTypeRefusalTests(TestCase):
 
 def _ten_still_slots():
     """Ten slots of one weather, for a terrain whose weather is beside the point."""
-    still = WeatherType(key="still_air")
+    still = WeatherSlot(WeatherType(key="still_air"))
     return {n: still for n in range(1, 11)}
 
 

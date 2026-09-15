@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from evennia_environment.effects import one_effect_per_type
-from evennia_environment.weather import WeatherSlot, WeatherType
+from evennia_environment.weather import WeatherSlot
 
 #: Every terrain has exactly this many weather slots, numbered from one.
 #: Counting from one matches evennia-calendar, which counts every calendar
@@ -104,17 +104,16 @@ class TerrainType:
         for number in SLOT_NUMBERS:
             slot = slots[number]
 
-            # A bare weather type is wrapped here rather than by the consumer,
-            # so nobody writes OVERCAST = WeatherSlot(OVERCAST) — which rebinds
-            # the name and loses the weather type behind it.
-            if isinstance(slot, WeatherType):
-                slot = WeatherSlot(slot)
-
+            # A WeatherSlot and nothing else, a WeatherType included. One
+            # shape, so a consumer never chooses between two classes on a
+            # condition — a slot that does not change after dark is
+            # WeatherSlot(BLIZZARD), and the slot fills its own night.
             if not isinstance(slot, WeatherSlot):
                 raise ValueError(
                     f"Terrain {self.key!r} declares {slot!r} in weather slot "
-                    f"{number}, which is a {type(slot).__name__} rather than a "
-                    f"WeatherSlot or a WeatherType."
+                    f"{number}, which is a {type(slot).__name__}. Every slot "
+                    f"holds a WeatherSlot — wrap a weather that does not change "
+                    f"after dark, as WeatherSlot(blizzard)."
                 )
 
             ordered.append(slot)

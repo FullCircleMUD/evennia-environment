@@ -23,7 +23,7 @@ MOVE_COST = EnvironmentEffectType(
 )
 
 _STILL = WeatherType(key="still_air")
-_TEN_STILL = {n: _STILL for n in range(1, 11)}
+_TEN_STILL = {n: WeatherSlot(_STILL) for n in range(1, 11)}
 
 #: A weather that contributes to the same key the swamp does, so RM-01 can
 #: show an answer passing through both. Every slot, so the case does not have
@@ -36,12 +36,12 @@ SWAMP = TerrainType(
     key="swamp",
     description="Black water between the roots.",
     effects=(EnvironmentEffect(MOVE_COST, Add(1.0)),),
-    weather_slots={n: _SWELTERING for n in range(1, 11)},
+    weather_slots={n: WeatherSlot(_SWELTERING) for n in range(1, 11)},
 )
 
 #: Ten distinct weathers, one per slot, so WB-11 proves the band picks the
 #: slot of its own number rather than any slot.
-_NUMBERED = {n: WeatherType(key=f"band_{n}") for n in range(1, 11)}
+_NUMBERED = {n: WeatherSlot(WeatherType(key=f"band_{n}")) for n in range(1, 11)}
 
 #: Slot 4 alone differs after dark, so WB-12 proves the night is read rather
 #: than the day happening to match.

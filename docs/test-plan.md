@@ -435,10 +435,9 @@ a cavern, an interior — declares ten of whatever its still air is called. Coun
 **The same weather in several slots is how a terrain weights it**, so the number of distinct weathers
 is ten or fewer.
 
-**A bare `WeatherType` is accepted as a slot value and wrapped.** A terrain with no day/night
-difference never meets `WeatherSlot`. Wrapping inside the declaration is also what stops a consumer
-writing `OVERCAST = WeatherSlot(OVERCAST)`, which rebinds the name and loses the weather type behind
-it.
+**Every slot value is a `WeatherSlot`. A `WeatherType` is not assignable to a terrain.** One shape,
+no condition to explain: a slot that does not change after dark is `WeatherSlot(BLIZZARD)`, and
+`WeatherSlot` fills its night from its day.
 
 **Declared as a dict, stored as a tuple in slot order** — the same in-one-form, out-another as
 `WeatherType.effects`, and for the same reason: a dict in a frozen dataclass is mutable, and mutating
@@ -474,8 +473,7 @@ default.
 | ID | Case | Test function |
 |---|---|---|
 | TT-07 | Slot keys must be exactly 1 to 10 — nine, eleven, a gap, a zero and a key that is not an integer are each refused, saying which slot is wrong | `test_tt_07_refuses_slot_keys_that_are_not_one_to_ten` |
-| TT-08 | A bare `WeatherType` as a slot value is wrapped into a `WeatherSlot` | `test_tt_08_wraps_a_bare_weather_type_in_a_slot` |
-| TT-09 | A slot value that is neither a `WeatherSlot` nor a `WeatherType` is refused | `test_tt_09_refuses_a_slot_that_is_neither_slot_nor_weather` |
+| TT-09 | A slot value that is not a `WeatherSlot` is refused, a `WeatherType` included | `test_tt_09_refuses_a_slot_that_is_not_a_weather_slot` |
 | TT-10 | Slots are stored as a tuple in slot order, so what a terrain holds cannot be mutated | `test_tt_10_stores_the_slots_as_a_tuple_in_slot_order` |
 
 ### The description
@@ -487,6 +485,12 @@ decides when it is shown.
 |---|---|---|
 | TT-12 | The description defaults to `None` when the consumer declares none | `test_tt_12_description_defaults_to_none` |
 | TT-13 | A description that is not a string is refused | `test_tt_13_refuses_a_description_that_is_not_a_string` |
+
+### Retired
+
+| ID | Why |
+|---|---|
+| TT-08 | Was "a bare `WeatherType` as a slot value is wrapped into a `WeatherSlot`". One shape is worth more than the four characters wrapping saved: a consumer choosing between two classes on a condition is a rule to document and to get wrong |
 
 ### The refusal
 
