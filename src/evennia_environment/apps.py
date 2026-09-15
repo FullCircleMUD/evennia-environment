@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""The Django app, and the one thing it does at boot.
+"""The Django app: what it checks at boot, and what it wires up.
 
-``ready()`` validates the consumer's configuration and nothing else. Checking
-here rather than at first use is the point: validation deferred to the first
-query means a misconfigured instance starts cleanly, runs, and then fails in
-front of a player with a message about nothing in particular.
+``ready()`` validates the consumer's configuration and connects the weather to
+the calendar's signals. Checking here rather than at first use is the point:
+validation deferred to the first query means a misconfigured instance starts
+cleanly, runs, and then fails in front of a player with a message about nothing
+in particular.
 """
 
 from django.apps import AppConfig

@@ -6,10 +6,15 @@ call site that needs it.
 
 ## Status
 
-**Scaffolded, nothing built.** The repo structure, the test runner and the documentation surfaces
-exist; the library's behaviour is still being agreed in
+**Feature complete, and untried against a real game.** A consumer declares their terrains, weathers
+and effect types in one module, adds one mixin to their room typeclass, and every room answers. Every
+case the suite covers is listed in
 [docs/test-plan.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/test-plan.md).
-See [docs/progress.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/progress.md).
+See
+[docs/installing.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/installing.md)
+for what that looks like, and
+[docs/progress.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/progress.md)
+for where it is up to.
 
 ## The problem it solves
 
@@ -23,7 +28,7 @@ Two systems that answer the same shape of question, wired into the same call sit
 
 One library, one vocabulary, declared by the consumer.
 
-The game registers the effect keys it will use, with a default for each. It declares its terrain types
+The game declares the effect keys it will use, with a default for each. It declares its terrain types
 and gives each one the values it overrides. Then any call site asks the room for the key it cares
 about — `look` asks about visibility, movement asks about cost, the survival tick asks about health.
 Weather contributes to the same keys, varying with the season and the day.
@@ -61,6 +66,7 @@ python runtests.py
 ## Learn more
 
 - [docs/INDEX.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/INDEX.md) — the design wiki
+- [docs/design.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/design.md) — how it is put together, and why.
 - [docs/test-plan.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/test-plan.md) — every case the library commits to covering
 - [docs/installing.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/installing.md) — everything a game declares
 - [docs/interoperability.md](https://github.com/FullCircleMUD/evennia-environment/blob/main/docs/interoperability.md) — this library against its siblings

@@ -19,13 +19,14 @@ writing content is a correct reading. What is refused is not declaring one.
 See docs/test-plan.md § CF.
 """
 
+import traceback
 from enum import Enum
 from functools import lru_cache
 
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
-from evennia_environment.terrain import TerrainType
+from evennia_calendar.config import Season
 
 SETTING_TERRAIN_ENUM = "ENVIRONMENT_TERRAIN_ENUM"
 SETTING_TERRAIN_TYPES = "ENVIRONMENT_TERRAIN_TYPES"
@@ -44,6 +45,30 @@ _WATCHES_EXAMPLE = "(6, 1)"
 #: The calendar's day is six watches, numbered from one.
 WATCHES = tuple(range(1, 7))
 
+#: Every terrain has exactly this many weather slots, numbered from one.
+#: Counting from one matches evennia-calendar, which counts every calendar
+#: position the same way.
+SLOT_NUMBERS = tuple(range(1, 11))
+
+#: How many bands the weather hash is spread across.
+BANDS = 6
+
+#: The unshifted band starts here, so the hash gives 3 to 8 rather than 1 to 6.
+#: That leaves two of a terrain's ten slots clear at each end for the season to
+#: shift the band into.
+BAND_FLOOR = 3
+
+#: What each season does to the band. Winter reaches slots 1 and 2 and nothing
+#: else does; summer reaches 9 and 10. The middle is reachable in any season,
+#: which is what spring and autumn get. Whether slot 1 holds the good weather
+#: or the bad is the consumer's — this hands over a number.
+SEASON_SHIFT = {
+    Season.WINTER: -2,
+    Season.SPRING: 0,
+    Season.AUTUMN: 0,
+    Season.SUMMER: 2,
+}
+
 #: Separates problems found inside one check, so check_settings can list
 #: them individually rather than as one paragraph.
 _JOIN = "\x00"
@@ -60,19 +85,20 @@ def check_settings() -> None:
     wrong in it fixes both in one pass rather than once per restart.
     """
     problems = []
-    cause = None
+    causes = []
 
     try:
         terrains = _checked_terrain_enum()
     except ImproperlyConfigured as exc:
         problems.extend(str(exc).split(_JOIN))
-        cause = exc.__cause__
+        _collect(causes, exc)
         terrains = None
 
     try:
         _check_terrain_types(terrains)
     except ImproperlyConfigured as exc:
         problems.extend(str(exc).split(_JOIN))
+        _collect(causes, exc)
 
     try:
         _check_dark_watches()
@@ -80,7 +106,19 @@ def check_settings() -> None:
         problems.extend(str(exc).split(_JOIN))
 
     if problems:
-        _refuse(problems, cause=cause)
+        _refuse(problems, causes)
+
+
+def _collect(causes, exc):
+    """Keep the error underneath a refusal, when there is one.
+
+    Both import checks can fail because the consumer's own module is broken
+    rather than because the setting is wrong, and "could not be loaded" alone
+    tells them only what the traceback already did. Kept for every check that
+    has one, not just the first: two broken modules are two things to fix.
+    """
+    if exc.__cause__ is not None:
+        causes.append(exc.__cause__)
 
 
 def _checked_terrain_enum():
@@ -166,6 +204,10 @@ def _check_terrain_types(terrains):
     cannot be checked against members nobody could read.
     """
     from django.conf import settings
+
+    # Inside the function: terrain.py reads SLOT_NUMBERS from here, so a
+    # module-scope import in this direction would close the loop.
+    from evennia_environment.terrain import TerrainType
 
     path = getattr(settings, SETTING_TERRAIN_TYPES, None)
 
@@ -253,16 +295,49 @@ def _check_dark_watches():
         )
 
 
-def _refuse(problems, cause=None):
-    """Raise one refusal carrying every problem found.
+def _refuse(problems, causes=()):
+    """Log one refusal carrying every problem found, then raise it.
 
     One problem per line, so a consumer with two things wrong works through a
     list rather than a paragraph.
+
+    Every refusal in this module funnels through here — the others are caught
+    by ``check_settings`` and folded in — so this one call site carries all of
+    them into the log. The console shows the traceback to whoever ran the start
+    command; ``environment.log`` is the record they still have an hour later.
+
+    The log gets more than the exception does. A ``raise ... from`` takes one
+    cause, and the file has room for every broken module's traceback.
     """
-    raise ImproperlyConfigured(
-        "evennia-environment cannot start:"
-        + "".join(f"{PROBLEM_PREFIX}{problem}" for problem in problems)
-    ) from cause
+    message = "evennia-environment cannot start:" + "".join(
+        f"{PROBLEM_PREFIX}{problem}" for problem in problems
+    )
+
+    # Inside the function: config is imported before Django is ready, and the
+    # library standards hold log imports out of this module's scope.
+    from evennia_environment.log import environment_log
+
+    # ERROR rather than WARN — the instance does not start.
+    environment_log(message + _underlying(causes), level="ERROR")
+
+    raise ImproperlyConfigured(message) from (causes[0] if causes else None)
+
+
+def _underlying(causes):
+    """Return the tracebacks under a refusal, as text to append, or ``""``.
+
+    The traceback rather than the message alone: a consumer whose declaration
+    module will not import needs the line that broke, and ``ImportError: no
+    module named x`` without one leaves them searching. ``trace=True`` on the
+    log call cannot supply it — that formats the *active* exception, and by the
+    time this runs both ``except`` blocks have exited.
+    """
+    if not causes:
+        return ""
+
+    return "\n" + "\n".join(
+        "".join(traceback.format_exception(cause)).rstrip() for cause in causes
+    )
 
 
 @lru_cache(maxsize=1)

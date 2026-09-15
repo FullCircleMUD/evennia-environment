@@ -27,24 +27,26 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**The effects vocabulary is built; terrain and weather are not.** `EnvironmentEffectType` and
-`ENVIRONMENT_EFFECT_TYPES` — the shape a consumer declares one effect type in, and the list they
-declare it to — are done and tested. Everything else is open:
-[docs/current-thinking-and-progress.md](docs/current-thinking-and-progress.md) is where a session
-picks the work up, and [docs/test-plan.md](docs/test-plan.md) carries the cases and the open
-decisions.
+**Feature complete, and untried against a real game.** A consumer declares their terrains, weathers
+and effect types in one module, adds one mixin to their room typeclass, and every room answers what
+its surroundings do. Every case in [docs/test-plan.md](docs/test-plan.md) has a test and
+every test traces to a case.
 
-There is no `config.py` and no `apps.py` yet, deliberately. Both exist to check settings, and no
-setting has been agreed. They land with the first one.
+[docs/design.md](docs/design.md) is how it is put together. [docs/installing.md](docs/installing.md)
+is what a consumer does, with a worked example at the bottom.
+
+What is open is in [docs/test-plan.md](docs/test-plan.md) § Open decisions — most of it weather
+refinement nothing has asked for yet.
 
 ## Where to read first
 
 1. [docs/test-plan.md](docs/test-plan.md) — the cases the library commits to. **A behavioural change
    starts here**, not in the code. **Start here.**
-2. [README.md](README.md) — what the library is and its status.
-3. [docs/INDEX.md](docs/INDEX.md) — map of all design docs.
-4. [docs/installing.md](docs/installing.md) — what a consumer declares.
-5. [docs/interoperability.md](docs/interoperability.md) — this library against its siblings.
+2. [docs/design.md](docs/design.md) — how it is put together, and why.
+3. [docs/installing.md](docs/installing.md) — what a consumer declares, with a worked example.
+4. [README.md](README.md) — what the library is and its status.
+5. [docs/INDEX.md](docs/INDEX.md) — map of all design docs.
+6. [docs/interoperability.md](docs/interoperability.md) — this library against its siblings.
 
 ## Load-bearing architectural principles
 
@@ -135,6 +137,7 @@ evennia-environment/
 ├── examples/                  # demo gamedirs for integration testing; empty so far
 ├── docs/                      # design wiki (humans + LLMs)
 │   ├── INDEX.md
+│   ├── design.md
 │   ├── installing.md
 │   ├── progress.md
 │   ├── test-plan.md
@@ -144,6 +147,7 @@ evennia-environment/
 │   └── evennia_environment/   # library code (src layout)
 │       ├── __init__.py
 │       ├── log.py             # binds environment_log via evennia-logging-extension
+│       ├── refusal.py         # the one route a refusal takes: log at ERROR, then raise
 │       └── tests.py           # unit tests, run via runtests.py
 └── tests/                     # standalone test infrastructure
     ├── __init__.py

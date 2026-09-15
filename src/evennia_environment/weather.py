@@ -22,9 +22,9 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Optional
 
-from evennia_calendar.config import Season
-
+from evennia_environment.config import BAND_FLOOR, BANDS, SEASON_SHIFT
 from evennia_environment.effects import one_effect_per_type
+from evennia_environment.refusal import refuse
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class WeatherSlot:
         ``slot.night is slot.day``, with no flag to carry.
         """
         if not isinstance(self.day, WeatherType):
-            raise ValueError(
+            refuse(
                 f"WeatherSlot was given {self.day!r} as its day weather, which "
                 f"is a {type(self.day).__name__} rather than a WeatherType. "
                 f"Pass the declared weather itself, not its key."
@@ -58,7 +58,7 @@ class WeatherSlot:
             return
 
         if not isinstance(self.night, WeatherType):
-            raise ValueError(
+            refuse(
                 f"WeatherSlot for {self.day.key!r} was given {self.night!r} as "
                 f"its night weather, which is a {type(self.night).__name__} "
                 f"rather than a WeatherType. Leave it out for a slot that does "
@@ -90,7 +90,7 @@ class WeatherType:
         class is easier to catch than a type per mistake.
         """
         if not isinstance(self.key, str):
-            raise ValueError(
+            refuse(
                 f"WeatherType key {self.key!r} is a {type(self.key).__name__}, "
                 f"not a string. A weather is looked up by name, so its key has "
                 f"to be one."
@@ -100,7 +100,7 @@ class WeatherType:
         # an effect key: the key is a mapping handle, and a player sees
         # description and transition_in rather than this.
         if not self.key:
-            raise ValueError(
+            refuse(
                 "WeatherType key is empty. Without a key the weather names "
                 "nothing and no terrain slot can hold it."
             )
@@ -121,31 +121,12 @@ class WeatherType:
                 continue
 
             if not isinstance(value, str):
-                raise ValueError(
+                refuse(
                     f"Weather {self.key!r} declares {name} as a "
                     f"{type(value).__name__}. It is text the consumer renders, "
                     f"so it has to be a string, or None for none at all."
                 )
 
-
-#: How many bands the hash is spread across.
-BANDS = 6
-
-#: The unshifted band starts here, so the hash gives 3 to 8 rather than 1 to 6.
-#: That leaves two of a terrain's ten slots clear at each end for the season to
-#: shift the band into.
-BAND_FLOOR = 3
-
-#: What each season does to the band. Winter reaches slots 1 and 2 and nothing
-#: else does; summer reaches 9 and 10. The middle is reachable in any season,
-#: which is what spring and autumn get. Whether slot 1 holds the good weather
-#: or the bad is the consumer's — this hands over a number.
-SEASON_SHIFT = {
-    Season.WINTER: -2,
-    Season.SPRING: 0,
-    Season.AUTUMN: 0,
-    Season.SUMMER: 2,
-}
 
 #: Today's band and the day it was worked out for. Module state, rebuilt on
 #: the next rollover or the next read — nothing about a band depends on it

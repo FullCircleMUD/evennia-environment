@@ -17,7 +17,6 @@ designed is in [Open decisions](#open-decisions) below.
 |---|---|
 | `SC` | The scaffold — the package installs and the runner runs |
 | `EF` | `EnvironmentEffectType` — the shape a consumer declares one effect type in |
-| `ER` | `EnvironmentEffectTypeRegistry` — the master list, and registering against it |
 | `EE` | `EnvironmentEffect` — an effect type paired with a magnitude |
 | `SH` | The stock helpers — `Constant`, `Multiply`, `Add`, `RoundUp`, `RoundDown`, `Chain` |
 | `WT` | `WeatherType` — the shape a consumer declares one weather in |
@@ -25,6 +24,8 @@ designed is in [Open decisions](#open-decisions) below.
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
 | `TP` | `TerrainProperty` — the attribute a room's terrain is held in |
 | `RS` | `resolve()` — what a key answers, given a terrain and a weather |
+| `RL` | What a refusal in play logs — the room's assignments and `resolve()` |
+| `DR` | `refuse()` — the one route every declaration refusal takes, and what it logs |
 | `CF` | The setting, and the boot check that refuses a bad one |
 | `WB` | The weather band — one number a day, for the whole game |
 | `DN` | Whether it is dark, held between watches |
@@ -109,81 +110,6 @@ calculation on every terrain that wanted it. `Constant(1.0)` is the static case.
 |---|---|---|
 | EF-12 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration. One class for all of them — each one means "you declared this wrong", and one class is easier to catch | `test_ef_12_every_refusal_is_a_value_error_naming_the_key` |
 
-### Retired
-
-| ID | Why |
-|---|---|
-| EF-06 — EF-11 | All six checked a default *value* against the declared datatype. The default is a helper now, so there is no value at the declaration to check. The type check they were doing moves to the call path, where it applies to every answer rather than only to the default |
-
-## ER — `EnvironmentEffectTypeRegistry` and `register()`
-
-The master list of effect types. It lives in library code so the library owns its structure, and
-a consumer adds to it from the module they declare their game in:
-
-```python
-from evennia_environment import ENVIRONMENT_EFFECT_TYPES, EnvironmentEffectType
-
-ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType("movement_cost", float, 1.0))
-```
-
-**`ENVIRONMENT_EFFECT_TYPES` is an instance, not a module-level dict.**
-`EnvironmentEffectTypeRegistry` is a class and `ENVIRONMENT_EFFECT_TYPES` is the one the library
-exposes, so a test builds its own and no case has to reset shared state between runs. ER-10 pins
-that the container is per-instance rather than a mutable class attribute, which is where this
-design goes wrong if it goes wrong.
-
-**Registration raises immediately**, like `EnvironmentEffectType` itself, and for the same reason: the
-call is in the consumer's own module, at a line they wrote. Boot-time collection belongs to
-`check_settings()`, which is a separate piece of work — nothing here knows about settings, imports or
-Django.
-
-**The registry holds no values.** A key's datatype and its default are all it carries. The value for a
-room comes from its terrain; the registry supplies the fallback when the terrain declares nothing for
-that key, and the list a terrain's keys are validated against. Both of its jobs are served by
-`get(key)`, which returns the `EnvironmentEffectType` or `None`.
-
-**`None` is a legitimate answer, not a failure.** Validating a terrain means asking about keys that
-may not be registered — that is the question being asked — so a miss is an ordinary outcome and `get`
-means what its name promises.
-
-**This section covers `register()` and `get()` and nothing else.** Membership, iteration and listing
-the master list each wait for a caller that wants them.
-
-### Registering
-
-| ID | Case | Test function |
-|---|---|---|
-| ER-01 | A registered effect type can be looked up by its key, and is the object that was registered | `test_er_01_a_registered_effect_type_is_returned_by_its_key` |
-| ER-02 | Registering something that is not an `EnvironmentEffectType` is refused | `test_er_02_refuses_something_that_is_not_an_effect_type` |
-| ER-03 | A fresh registry has nothing registered | `test_er_03_a_fresh_registry_has_nothing_registered` |
-| ER-11 | `get()` on a key nobody registered returns `None` | `test_er_11_an_unregistered_key_returns_none` |
-
-### The duplicate-key rule
-
-**The key is the identity.** Two declarations under one key are the same effect type as far as the
-library can tell, and one of them is being ignored — so the second is refused, whatever it holds.
-
-Comparing the declarations instead is no longer possible. A default is a helper, and two
-separately-written declarations hold different function objects even when they read identically, so
-"is this the same declaration" has no answer the library can trust.
-
-| ID | Case | Test function |
-|---|---|---|
-| ER-04 | A second effect type under a key already registered is refused, whatever it declares | `test_er_04_refuses_a_second_effect_type_under_a_taken_key` |
-| ER-06 | The duplicate refusal is a `ValueError` naming the key, as every declaration refusal is | `test_er_06_the_duplicate_refusal_names_the_key` |
-
-### Retired
-
-| ID | Why |
-|---|---|
-| ER-05 | Was "re-registering an identical effect type passes". Two separately-built declarations can no longer be identical — their helpers are different function objects — so the case tested something that cannot happen. ER-04 now covers every second registration |
-
-### Isolation
-
-| ID | Case | Test function |
-|---|---|---|
-| ER-10 | Two registries do not share state — registering in one leaves the other empty | `test_er_10_two_registries_do_not_share_state` |
-
 ## EE — `EnvironmentEffect(effect_type, helper)`
 
 A frozen dataclass pairing a declared effect type with the helper that answers for it. This is what
@@ -231,13 +157,6 @@ call path, where it applies to every contribution rather than only to the one de
 | ID | Case | Test function |
 |---|---|---|
 | EE-08 | Every refusal is a `ValueError`. Where the type is a real `EnvironmentEffectType` the message names its key, so the consumer can find the declaration; where it is not, it names what was passed instead | `test_ee_08_every_refusal_is_a_value_error_naming_the_key` |
-
-### Retired
-
-| ID | Why |
-|---|---|
-| EE-04 — EE-06 | All three checked a magnitude against the type's datatype. There is no magnitude now — a contribution is a helper, and what it returns is checked where it is called |
-| EE-07 | Was "a `None` magnitude is refused". Absorbed into EE-09: `None` is not callable, so it fails the helper check like anything else that cannot answer |
 
 ## SH — the stock helpers
 
@@ -486,12 +405,6 @@ decides when it is shown.
 | TT-12 | The description defaults to `None` when the consumer declares none | `test_tt_12_description_defaults_to_none` |
 | TT-13 | A description that is not a string is refused | `test_tt_13_refuses_a_description_that_is_not_a_string` |
 
-### Retired
-
-| ID | Why |
-|---|---|
-| TT-08 | Was "a bare `WeatherType` as a slot value is wrapped into a `WeatherSlot`". One shape is worth more than the four characters wrapping saved: a consumer choosing between two classes on a condition is a rule to document and to get wrong |
-
 ### The refusal
 
 | ID | Case | Test function |
@@ -516,9 +429,9 @@ value and stores the value; `at_get()` resolves the value back to the member. So
 `room.terrain is Terrain.MOUNTAINS`, while what is stored is `"mountains"` — a plain string that
 nothing has to unpickle, that YAML can write, and that a builder command can type.
 
-**That string form is what makes world content work.** `evennia-world-builder` applies attributes
-with `setattr` after `create_object`, so assignment runs through this property — and a YAML file can
-only supply a string. Refusing strings would fail every world-built room.
+**That string form is what makes world content work.** Anything that builds a room in bulk carries
+its terrain as text — a YAML field, a CSV column, a command argument — and none of them can hold an
+enum member. Refusing strings would refuse every one of them.
 
 **`strattr=True`.** The value is held in Evennia's string column, so "every room whose terrain is
 swamp" is a database query rather than a walk. It is decided now because it cannot be added later: a
@@ -526,8 +439,9 @@ value written without the flag is invisible to a property declared with it.
 
 **Terrain is write-once.** A room is given its terrain when it is built and does not change it in
 play. Once a member is stored, a different one is refused; the same one passes and changes nothing,
-so a build applying the same content twice is harmless. `evennia-world-builder` tears down and
-recreates rather than updating in place, so a rebuild assigns each room exactly once.
+so a build applying the same content twice is harmless. A builder that recreates its rooms never
+meets the rule; one that tries to change a standing room's terrain is refused, which is the rule
+working rather than a conflict with it.
 
 **`None` is what an unassigned room holds, not a way to clear one.** Evennia's `autocreate` defaults
 to `True`, so the first read of an unset attribute writes the default through `at_set()` — meaning
@@ -557,7 +471,7 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | ID | Case | Test function |
 |---|---|---|
 | TP-03 | A member of the declared enum is accepted, and reads back as that same member | `test_tp_03_accepts_a_member_and_reads_it_back` |
-| TP-08 | The member's value as a string is accepted, and reads back as the member — the world-builder path | `test_tp_08_accepts_the_members_value_as_a_string` |
+| TP-08 | The member's value as a string is accepted, and reads back as the member — the bulk-content path | `test_tp_08_accepts_the_members_value_as_a_string` |
 | TP-10 | What is stored is the plain string, not the member. Read through the attribute handler rather than the property, since the property would resolve it and hide the difference | `test_tp_10_stores_the_plain_string` |
 | TP-11 | `None` is accepted while nothing is stored, which is what an unassigned room holds | `test_tp_11_accepts_none_while_nothing_is_stored` |
 
@@ -582,13 +496,8 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | ID | Case | Test function |
 |---|---|---|
 | TP-07 | The refusal names what was assigned, so the mis-set is findable | `test_tp_07_the_refusal_names_what_was_assigned` |
-
-### Retired
-
-| ID | Why |
-|---|---|
-| TP-02 | Was "declaring the property with something that is not an enum class is refused". There is nothing to declare it with now — the enum comes from the setting, so that check is CF-04, made once at boot rather than per typeclass |
-| TP-06 | Was "`None` is refused". Reversed by `autocreate=True` — the default is pushed through `at_set()` on first read, so refusing `None` makes an unassigned room unreadable. TP-11 and TP-14 carry the two halves of what replaced it |
+| TP-15 | The refusal names the room, so a build applying content to hundreds of them says which one failed. `"terrain cannot be 'swmap'"` with no room is the bad value and no way to find it | `test_tp_15_the_refusal_names_the_room` |
+| TP-16 | An unknown terrain name refuses without the enum's own `ValueError` chained underneath — the consumer's mistake is the name, not the lookup that went looking for it | `test_tp_16_an_unknown_name_does_not_chain_the_enums_own_error` |
 
 ## RS — `resolve(effect_type, terrain_type, weather_type, **kwargs)`
 
@@ -645,6 +554,97 @@ is at fault: the call site for a missing kwarg, the contributor for a bad return
 | RS-10 | A terrain helper returning the wrong type is refused, and the refusal says it was the terrain | `test_rs_10_refuses_a_terrain_helper_returning_the_wrong_type` |
 | RS-11 | A weather helper returning the wrong type is refused, and the refusal says it was the weather | `test_rs_11_refuses_a_weather_helper_returning_the_wrong_type` |
 
+## RL — what a refusal in play logs
+
+The refusals that can fire with a game up: the room's assignment refusals and `resolve()`'s. Unlike
+the declaration and boot refusals, nobody is watching a console when these happen.
+
+**The room's three go through `refuse_attribute()`**, the `AttributeError` sibling of `refuse()`.
+`AttributeError` is the descriptor protocol's own signal and is what these already raise, so the only
+behavioural change is the line on disk and the room's name in the message.
+
+**`resolve()`'s two use `refuse()` unchanged** — they already raise `ValueError`, which is what it
+raises. Nothing new is needed for them.
+
+**Every occurrence is logged, and repeats are not suppressed.** `resolve()` is on the per-action path,
+so one broken helper writes a line for every call that reaches it. That volume is the point: a log
+filling with the same refusal is how a consumer finds out they have something to fix. Suppression
+would be code carried for the life of the library to make a symptom quieter.
+
+**The room refusals name the room.** A world build applies content to hundreds of rooms and the caller
+may well catch per room and carry on, so a refusal that names only the bad value leaves an operator
+with nothing to search for. `at_set()` has the object in hand; `_to_stored()` does not, and gets it
+threaded through. The naming is pinned by TP-15 in both channels, since the exception wants it as much
+as the log does.
+
+**These fire with the game up, so the reactor is running** — evennia-logging-extension writes through
+`log_file()` on a deferred rather than synchronously, which is the opposite of the window the `CF`
+cases run in. The cases read the file back the same way regardless.
+
+**`resolve()` documents itself as needing no room, no database and no Evennia.** That holds for the
+answering path and no longer holds for the refusing one, which now reaches the log shim. A consumer
+calling it from a bare script still gets the refusal; the line goes to `pre-startup.log`.
+
+### The room's refusals
+
+| ID | Case | Test function |
+|---|---|---|
+| RL-01 | `refuse_attribute()` logs its message to `environment.log` at ERROR, then raises `AttributeError` carrying it | `test_rl_01_logs_at_error_then_raises_an_attribute_error` |
+| RL-02 | The log line and the exception carry the same text | `test_rl_02_the_log_line_and_the_exception_carry_the_same_text` |
+| RL-03 | A refused write-once change lands a line naming the room | `test_rl_03_a_refused_write_once_change_lands_a_line` |
+| RL-04 | A refused terrain name lands a line naming the room | `test_rl_04_a_refused_terrain_name_lands_a_line` |
+| RL-05 | A refused value that is neither a member nor a string lands a line naming the room | `test_rl_05_a_refused_value_of_the_wrong_kind_lands_a_line` |
+| RL-06 | An accepted assignment writes no log line | `test_rl_06_an_accepted_assignment_writes_no_log_line` |
+
+### `resolve()`'s refusals
+
+| ID | Case | Test function |
+|---|---|---|
+| RL-07 | A missing required kwarg lands a line, and still raises `ValueError` | `test_rl_07_a_missing_required_kwarg_lands_a_line` |
+| RL-08 | A helper answering with the wrong type lands a line naming the contributor that got it wrong | `test_rl_08_a_wrong_type_lands_a_line_naming_the_contributor` |
+| RL-09 | Two calls hitting the same problem land two lines — repeats are deliberately not suppressed, so a filling log is the signal that something needs fixing | `test_rl_09_the_same_problem_twice_lands_two_lines` |
+| RL-10 | A resolve that answers writes no log line | `test_rl_10_a_resolve_that_answers_writes_no_log_line` |
+
+## DR — `refuse()`, the one route a declaration refusal takes
+
+Every refusal in `effects.py`, `terrain.py`, `weather.py` and `helpers.py` goes through one function
+that logs the message at ERROR and then raises `ValueError` carrying it.
+
+**It exists to make the logging provable.** A `raise ValueError` per site would need a delivery case
+per site to be sure none was missed, and the next one added would slip through silently. One route
+needs one delivery case, plus `DR-07` to hold the route closed.
+
+**The exception type does not change.** They already raise `ValueError` — one class for "you declared
+this wrong", easier to catch than a type per mistake — so `refuse()` raises that and the only
+behavioural change is the line on disk.
+
+**These fire as the consumer's declaration module imports**, which in a real boot is after Evennia has
+set `DJANGO_SETTINGS_MODULE`, so `LOG_DIR` resolves and lines land in `environment.log`. A declaration
+imported from a bare script or a REPL reaches `pre-startup.log` instead — an anomaly rather than a
+boot phase, and evennia-logging-extension's business, not a case here.
+
+`ERROR`, not `WARN`: a refused declaration means the consumer's game does not have the thing they
+wrote down.
+
+**The cases read the log back from disk**, for the reason the `CF` ones do — a mocked shim asserts a
+call was made and passes while nothing lands in a file.
+
+**`DR-03` to `DR-06` are one per module, not one per raise.** Each proves its module routes through
+`refuse()` at all; `DR-07` is what covers the sites individually, by reading the source rather than by
+exercising every one. A structural case because the risk is a site left behind, and no sampling of
+call sites can see the one that was missed.
+
+| ID | Case | Test function |
+|---|---|---|
+| DR-01 | `refuse()` logs its message to `environment.log` at ERROR, then raises `ValueError` carrying it | `test_dr_01_logs_at_error_then_raises_a_value_error` |
+| DR-02 | The log line and the exception carry the same text | `test_dr_02_the_log_line_and_the_exception_carry_the_same_text` |
+| DR-03 | A refused declaration in `effects.py` lands a line | `test_dr_03_a_refused_effect_declaration_lands_a_line` |
+| DR-04 | A refused declaration in `terrain.py` lands a line | `test_dr_04_a_refused_terrain_declaration_lands_a_line` |
+| DR-05 | A refused declaration in `weather.py` lands a line | `test_dr_05_a_refused_weather_declaration_lands_a_line` |
+| DR-06 | A refused declaration in `helpers.py` lands a line | `test_dr_06_a_refused_helper_declaration_lands_a_line` |
+| DR-07 | No `raise ValueError` remains in the four declaration modules outside `refuse()` itself — asserted over the parsed source, so a site added later is caught | `test_dr_07_no_declaration_module_raises_a_value_error_directly` |
+| DR-08 | A declaration that is accepted writes no log line | `test_dr_08_an_accepted_declaration_writes_no_log_line` |
+
 ## CF — the setting and `check_settings()`
 
 The consumer's terrain enum reaches the library as a setting naming it:
@@ -675,6 +675,12 @@ install before writing content. What is refused is not declaring one at all.
 
 **A third setting, naming the declaration module, lands when effect-type registration needs a known
 moment to happen in.** Nothing does yet, and a setting with no consumer is a setting to get wrong.
+
+**A refusal is logged before it is raised.** The console shows a traceback to whoever ran the start
+command; `environment.log` is the durable record the consumer still has an hour later, and the one
+they can be asked to send. Every refusal funnels through the single raise in `_refuse()` — the other
+eleven are caught by `check_settings()` and folded into it — so one call site carries every reason
+into the log without a delivery case per reason.
 
 ### The setting
 
@@ -731,6 +737,43 @@ correct reading; not declaring at all is not.
 | ID | Case | Test function |
 |---|---|---|
 | CF-09 | With a valid setting the accessor returns the consumer's enum, and `check_settings()` passes | `test_cf_09_a_valid_setting_resolves_to_the_enum` |
+
+### Logging the refusal
+
+The cases assert **delivery, not intent** — each reads the line back from the suite's `LOG_DIR`,
+never by mocking `environment_log`. A mocked shim asserts only that a call was made; calendar's
+CF-11 was written that way first and passed while no line ever reached disk. `check_settings()` runs
+from `AppConfig.ready()` during `django.setup()`, before the reactor exists, and
+evennia-logging-extension writes that window synchronously — which is what makes a boot refusal
+logable at all.
+
+`ERROR`, not `WARN`: the instance does not start.
+
+**CF-20 is asserted against a configuration with two problems**, so same-text equality proves the
+whole collected list reaches the log rather than just the first line of it. That is why there is no
+separate "every problem is logged" case.
+
+**CF-21 and CF-22 are separate because either setting can name a module that will not import**, and
+each is checked by its own function. `could not be loaded` on its own tells a consumer what they
+already knew from the traceback they could not keep, so the log carries the cause's full traceback
+underneath the refusal — the line that broke is the part they can act on.
+
+**The log gets more than the exception does.** A `raise ... from` takes one cause, so the exception
+chains the first; the file has room for every broken module's traceback and gets all of them. That is
+the one place the two channels deliberately differ, and CF-20's same-text assertion is `in` rather
+than equality because of it.
+
+`trace=True` will not supply the traceback. It formats the *active* exception, and `_refuse()` runs
+after every `except` block has exited, so there is nothing active to format — the causes are carried
+into the message explicitly.
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-19 | A refusal is logged to `environment.log` at ERROR before the raise, asserted by reading the file back | `test_cf_19_a_refusal_is_logged_to_disk_at_error` |
+| CF-20 | The log line and the exception carry the same problem text, asserted where two problems were collected — the file and the console tell one story | `test_cf_20_the_log_line_and_the_exception_carry_the_same_text` |
+| CF-21 | A terrain enum module that will not import logs the underlying error as well as the refusal | `test_cf_21_a_terrain_enum_that_will_not_import_logs_the_cause` |
+| CF-22 | A terrain types module that will not import logs the underlying error as well as the refusal | `test_cf_22_terrain_types_that_will_not_import_log_the_cause` |
+| CF-23 | A passing check writes no log line | `test_cf_23_a_passing_check_writes_no_log_line` |
 
 ## WB — the weather band
 
@@ -860,131 +903,16 @@ terrain answer with the effect type's default rather than raising.
 | RM-07 | A weather declaring no description returns `None` rather than raising | `test_rm_07_a_weather_with_no_description_returns_none` |
 | RM-09 | `get_weather_description` on a room with no terrain returns `None` — there is no slot table to read a band against | `test_rm_09_a_room_with_no_terrain_has_no_weather` |
 
-## Current thinking
+## The design
 
-Where the design has got to. Everything here is the current working position and open to revision —
-a later idea is not fighting a ruling. Behaviour listed here still needs cases before it is built.
-
-### The effects vocabulary
-
-- **The consumer declares three things in one module, and one setting names that module.** Their
-  terrain types as an `Enum`, their effects registered against the library's master list, and the
-  values each terrain gives for the effects it overrides.
-- **`EnvironmentEffectType` is the declared shape** — `key`, `datatype`, `default` — and the consumer
-  constructs one per effect type. Covered by the `EF` cases above.
-- **A type declares a kind of effect; an `EnvironmentEffect` pairs one with a helper.** The type
-  carries no answer of its own, so the thing terrain and weather hold is the pairing. The same object
-  serves both, and neither invents a payload format.
-- **The master list lives in library code, not the consumer's.** The consumer calls
-  `ENVIRONMENT_EFFECT_TYPES.register(EnvironmentEffectType(...))`; the library owns the container
-  and its structure. The library imports the consumer's module itself, during `ready()`, so
-  registration happens at a known moment.
-- **A room stores its terrain as the member's string value, and reads it back as the member.**
-  `at_set()` takes either form and stores the string; `at_get()` resolves it. That is what lets
-  YAML-authored world content assign a terrain, since a YAML file can only supply a string. Held as a
-  `strattr` so it can be queried, and write-once, because a room is given its terrain when it is
-  built and does not change it in play. Covered by the `TP` cases above.
-- **Effects resolve at read time from the terrain, never cached on the room.** The room holds a
-  reference; changing a terrain's numbers changes every room of that terrain with nothing to
-  migrate. A per-room cache would go stale for as long as Evennia's idmapper holds the instance.
-
-### Asking a room, and how an answer is resolved
-
-- **A call site asks for one key at a time, and gets a value back.** The library returns; it never
-  reaches out and changes anything. Everything in
-  [archive/consumer-use-cases.md](archive/consumer-use-cases.md) is reachable that way — a hook that
-  was already running asks a question and decides locally.
-- **An effect carries a helper, not a value.** `f(value, **kwargs) -> value`. A static answer is a
-  stock helper — `Constant(2.0)` — so there is one shape and one code path, and a value that depends
-  on the hour or on who is asking is the same shape as one that does not.
-- **The caller's kwargs pass straight through** to every helper, including the character and anything
-  else a key needs. The library does not inspect them.
-- **Helpers read; they do not mutate.** A consumer's helper is their code and can do what they write,
-  but the library's contract is the returned value, and a helper that changes things makes a query
-  unsafe — movement prices a destination nobody is standing in.
-- **At most one effect per key per contributor.** A terrain declares one effect for `move_cost`; so
-  does a weather. A second for a key already present is refused at the declaration, naming the key,
-  identical or not — two entries in one literal is a paste error, not a module loaded twice.
-- **Resolution is the default, then terrain, then weather.** Fixed, documented, not configurable.
-  Each receives the running value; nothing declared for that key leaves it untouched.
-
-```python
-value = default_helper(None, **kwargs)
-if terrain declares this key:  value = terrain_helper(value, **kwargs)
-if weather declares this key:  value = weather_helper(value, **kwargs)
-```
-
-- **That is the whole combination rule.** No kinds, no priorities, no tiebreaks, no merge algebra.
-  One-per-contributor is what buys it: the chain is never longer than two, so there is no ordering
-  problem to solve. Whether a contribution replaces or modifies is the helper's own choice —
-  `Constant` ignores what it was handed, anything else uses it.
-- **The default is a helper too, and is the starting value.** A type whose sensible default is a
-  calculation — natural light, which is terrain and the hour together — would otherwise repeat that
-  calculation on every terrain that wanted it.
-- **The cost, taken deliberately: terrain cannot react to weather.** A vale that amplifies whatever
-  the sky is doing is not writable as a terrain effect, since terrain runs first. A weather helper can
-  look at the room's terrain and do it from that side. Nothing in the use cases wants it.
-- **Terrain tables are Python, not YAML.** A YAML file cannot hold a function. This does not touch
-  world content — a room still gets `terrain: swamp` from YAML, because that is a string naming a
-  member.
-
-### Weather and the terrain's weather slots
-
-- **Weather types are registered the way effects are.** `blizzard`, `thunderstorm`, `scorching_hot` —
-  one entry each, declared once and referenced from any terrain that can have it. The names are the
-  consumer's, as the effect keys are.
-- **A weather type carries environment effects**, against keys the consumer has already registered. A
-  weather with no effects at all is legal and expected: the mild end of a spectrum — sunny with some
-  clouds — contributes nothing.
-- **It also carries two optional strings the consumer renders and the library never touches** — a
-  description for the weather line under a room description, and a transition rendered when this
-  weather becomes active. One incoming message per weather, not a message per from-to pair. Covered
-  by the `WT` cases above.
-- **A terrain carries its own environment effects too**, always in force and independent of the
-  weather. Crossing a swamp costs more whatever the sky is doing.
-- **A terrain has exactly ten numbered weather slots, every one filled.** Not "up to ten". The same
-  weather may occupy several slots, which is how a terrain weights it, so the number of *distinct*
-  weathers is ten or fewer.
-- **Each slot holds a day weather and an optional night weather.** Left empty, the day weather stands
-  through the dark — a blizzard at night is still a blizzard. Filled, a different registry entry takes
-  over during the dark watches, which is how a desert is scorching by day and freezing by night under
-  the same clear sky. The night entry is another weather with its own effects, not an inverse of the
-  day one.
-- **The variance belongs to the terrain, not to the weather type.** A clear sky is not inherently
-  freezing at night; it is freezing at night *in a desert*. Putting the day/night pair on the weather
-  type instead would need a separate entry per terrain and lose the reuse the registry exists for.
-- **The consumer declares which of the six watches are dark.** `evennia-calendar` reports the watch
-  and deliberately does not say which are night — "which of them are dark is the game's business, not
-  ours" — so the mapping is declared alongside the terrains and the effect keys.
-- **One weather draw per day**, the dusk swap being the only change within it. That is what keeps the
-  active weather a pure function of the day number, the terrain and a seed: nothing stored, nothing
-  to migrate, and every process in a multi-instance deployment computing the same answer without
-  coordinating. Drawing per watch would need stored state and would make the night slot meaningless.
-- **A room always has a weather.** Every slot is filled, so there is no null state and the library
-  never models an absence of weather.
-- **What a character gets is the terrain's effects and the active weather's, together.** Different
-  consumer systems read different keys out of that set, at whatever moment each of them runs.
+How the library is put together, and why, is in [design.md](design.md). This page is the cases.
 
 ## Open decisions
 
 What has to be decided before the surface it belongs to can be built. Each is a question raised in
 the design conversation and left open, not a gap to be filled by whoever reads this next.
 
-**The effects registry**
-
-- `[TBD — needs discussion: the rest of the read surface. Looking a key up is all `register()` needs
-  to be testable; membership, iteration, listing the master list and what a key nobody registered
-  does are each waiting for a caller that wants them.]`
-- `[TBD — needs discussion: whether registration closes once boot validation has run. A key
-  registered afterwards would not have been checked against terrains already validated against the
-  list. Belongs with `check_settings()`, which is where boot is a thing that has happened.]`
-
 **Terrain**
-
-- `[TBD — needs discussion: whether the terrain-to-effects table is registered the way effects are —
-  `TERRAINS.register(Terrain.SWAMP, {...})` — or stays a consumer-authored dict validated at boot.
-  Registration would validate each terrain against the master list at the line that declared it,
-  which is the argument that carried for effects.]`
 - `[TBD — needs discussion: whether every `Terrain` member must appear in the terrain table. Absent
   could mean "every effect at its default" or could mean the author forgot.]`
 - `[TBD — needs discussion: whether a room with no terrain at all is legal and neutral, or a mistake
@@ -1020,3 +948,21 @@ the design conversation and left open, not a gap to be filled by whoever reads t
 **Where this came from.** The design conversation is summarised in the umbrella's
 `ops/scratch/weather-library-exploration-2026-09-10.md`, which is a brainstorm and says so. Nothing
 in it is agreed. Treat a shape lifted from it as an invention until it has been discussed here.
+
+## Retired case IDs
+
+Not reused. An ID names one behaviour for the life of the plan, so a commit or a docstring
+referring to one always means the same thing.
+
+`EF-06 — EF-11`, `ER-01 — ER-11`, `EE-04 — EE-06`, `EE-07`, `TT-08`, `TP-02`, `TP-06`
+
+**The whole `ER` block, and the registry with it.** `EnvironmentEffectTypeRegistry` and
+`ENVIRONMENT_EFFECT_TYPES` were read by nothing but their own cases. Every path in the library takes
+the `EnvironmentEffectType` object — an effect holds one, `resolve()` is handed one, and
+`_declared_by` matches on identity — so no key is ever looked up, and the master list had no reader.
+
+The three jobs it would have done are done by the consumer keeping their declarations in one module,
+which is what installing.md already tells them to do: that module is the master list, a terrain
+referencing `MOVE_COST` gets a `NameError` on a typo before the library sees it, and the module itself
+is what an enumerable vocabulary would be read from. FCM's own `catalogue.py` was written that way
+without registering anything.

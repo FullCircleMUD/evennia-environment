@@ -2,12 +2,17 @@
 """What a key answers, given a terrain and a weather.
 
 Pure Python: the contributors arrive as arguments rather than being found, so
-this needs no room, no database and no Evennia. The room accessor is a thin
-wrapper that finds both and delegates, and a consumer with a room-like thing
-that is not a room can call this directly.
+answering needs no room, no database and no Evennia. The room accessor is a
+thin wrapper that finds both and delegates, and a consumer with a room-like
+thing that is not a room can call this directly.
 
-See docs/test-plan.md § RS.
+Refusing reaches the log shim, so that path does need Evennia. Called from a
+bare script the refusal still raises; the line lands in ``pre-startup.log``.
+
+See docs/test-plan.md § RS and § RL.
 """
+
+from evennia_environment.refusal import refuse
 
 
 def resolve(effect_type, terrain_type=None, weather_type=None, **kwargs):
@@ -28,7 +33,7 @@ def resolve(effect_type, terrain_type=None, weather_type=None, **kwargs):
     """
     missing = [name for name in effect_type.requires if name not in kwargs]
     if missing:
-        raise ValueError(
+        refuse(
             f"{effect_type.key!r} was asked for without "
             f"{', '.join(repr(name) for name in missing)}. Its effect type "
             f"declares requires={tuple(effect_type.requires)!r}, so every call "
@@ -89,7 +94,7 @@ def _checked(value, effect_type, described):
     if isinstance(value, effect_type.return_type):
         return value
 
-    raise ValueError(
+    refuse(
         f"{described} answered {effect_type.key!r} with {value!r}, which is a "
         f"{type(value).__name__} rather than the "
         f"{effect_type.return_type.__name__} the effect type declares."

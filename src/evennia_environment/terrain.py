@@ -14,13 +14,10 @@ See docs/test-plan.md § TT.
 from dataclasses import dataclass
 from typing import Optional
 
+from evennia_environment.config import SLOT_NUMBERS
 from evennia_environment.effects import one_effect_per_type
+from evennia_environment.refusal import refuse
 from evennia_environment.weather import WeatherSlot
-
-#: Every terrain has exactly this many weather slots, numbered from one.
-#: Counting from one matches evennia-calendar, which counts every calendar
-#: position the same way.
-SLOT_NUMBERS = tuple(range(1, 11))
 
 
 @dataclass(frozen=True)
@@ -44,14 +41,14 @@ class TerrainType:
         Every refusal is a ``ValueError``, as every other declaration's is.
         """
         if not isinstance(self.key, str):
-            raise ValueError(
+            refuse(
                 f"TerrainType key {self.key!r} is a {type(self.key).__name__}, "
                 f"not a string. A terrain is looked up by name, so its key has "
                 f"to be one."
             )
 
         if not self.key:
-            raise ValueError(
+            refuse(
                 "TerrainType key is empty. Without a key the terrain names "
                 "nothing and no room can be assigned it."
             )
@@ -65,7 +62,7 @@ class TerrainType:
         object.__setattr__(self, "weather_slots", self._slots_in_order())
 
         if self.description is not None and not isinstance(self.description, str):
-            raise ValueError(
+            refuse(
                 f"Terrain {self.key!r} declares a description as a "
                 f"{type(self.description).__name__}. It is text the consumer "
                 f"renders, so it has to be a string, or None for none at all."
@@ -81,7 +78,7 @@ class TerrainType:
         slots = self.weather_slots
 
         if not isinstance(slots, dict):
-            raise ValueError(
+            refuse(
                 f"Terrain {self.key!r} declares weather_slots as {slots!r}. It "
                 f"is a dict keyed 1 to 10, one weather slot each."
             )
@@ -91,7 +88,7 @@ class TerrainType:
             repr(number) for number in slots if number not in SLOT_NUMBERS
         )
         if missing or extra:
-            raise ValueError(
+            refuse(
                 f"Terrain {self.key!r} declares weather slots "
                 f"{sorted(map(repr, slots))}. Every terrain has exactly ten, "
                 f"keyed 1 to 10"
@@ -109,7 +106,7 @@ class TerrainType:
             # condition — a slot that does not change after dark is
             # WeatherSlot(BLIZZARD), and the slot fills its own night.
             if not isinstance(slot, WeatherSlot):
-                raise ValueError(
+                refuse(
                     f"Terrain {self.key!r} declares {slot!r} in weather slot "
                     f"{number}, which is a {type(slot).__name__}. Every slot "
                     f"holds a WeatherSlot — wrap a weather that does not change "

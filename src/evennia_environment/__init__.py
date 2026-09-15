@@ -5,22 +5,27 @@ Tagline: *What a room's surroundings do to whoever is standing in it.*
 
 The library holds two contributors to one answer. **Terrain** is permanent and
 belongs to the room. **Weather** varies with the calendar and belongs to the
-region. Both speak the same vocabulary: effect keys the consumer registers, and
+region. Both speak the same vocabulary: effect keys the consumer declares, and
 values a call site asks for by name.
 
-``EnvironmentEffectType`` and ``ENVIRONMENT_EFFECT_TYPES`` are the public surface so
-far — the shape a consumer declares one effect in, and the list they declare it
-to. The rest of the design is being agreed in docs/test-plan.md before it is
-built. See docs/INDEX.md for the design wiki.
+What a consumer imports from here: the declarations — ``EnvironmentEffectType``,
+``EnvironmentEffect``, ``WeatherType``, ``WeatherSlot``, ``TerrainType`` — the
+registry they declare effect types to, the stock helpers, and ``resolve()``.
+``__all__`` below is the list.
+
+``EnvironmentRoomMixin`` is **not** here. It imports Evennia, and this module is
+imported while Django is still building its app registry, so a consumer takes it
+from ``evennia_environment.room`` directly.
+
+See docs/installing.md for what a consumer declares, and docs/INDEX.md for the
+design wiki.
 """
 
 # Safe at module scope: both are pure Python and import neither Django nor
 # Evennia, so nothing here runs while the app registry is still being built.
 from evennia_environment.effects import (
-    ENVIRONMENT_EFFECT_TYPES,
     EnvironmentEffect,
     EnvironmentEffectType,
-    EnvironmentEffectTypeRegistry,
 )
 from evennia_environment.helpers import (
     Add,
@@ -44,13 +49,11 @@ from evennia_environment.weather import (
 __version__ = "0.0.1"
 
 __all__ = [
-    "ENVIRONMENT_EFFECT_TYPES",
     "Add",
     "Chain",
     "Constant",
     "EnvironmentEffect",
     "EnvironmentEffectType",
-    "EnvironmentEffectTypeRegistry",
     "Multiply",
     "RoundDown",
     "RoundUp",

@@ -1,31 +1,33 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""Effect types, the list they go in, and an effect type with a magnitude.
+"""Effect types, and an effect type with a magnitude.
 
 An effect type is a named thing a room's surroundings can change — what it is
 called, what type its values are in, and what something that says nothing about
 it gives. The library never invents one: a consumer declares every effect type
-their game reads, and terrains are validated against that list.
+their game reads.
 
 An ``EnvironmentEffect`` is a type paired with a magnitude. The type says
 ``movement_cost`` is a float defaulting to 1.0; the effect says a swamp makes
 it 2.5. Terrain and weather both hold these, so neither invents a payload
 format of its own.
 
+**An effect type is held, not looked up.** An effect carries the object, and
+``resolve()`` is handed it, so nothing here maps a key to a type. The consumer's
+declaration module is the list of what their game can be asked; the key is for
+naming one in a refusal.
+
 Everything here validates itself on construction and raises there rather than
 collecting. A malformed declaration is the consumer's own code failing at their
 own line, and a traceback pointing at that line is worth more than a tidy list
-pointing at us. ``EnvironmentEffectTypeRegistry`` applies the same rule to
-registering a type.
-
-**The registry holds no magnitudes.** A key's datatype and its default are all
-it carries — the value for a room comes from its terrain, and the registry
-supplies the fallback when the terrain declares nothing for that key.
+pointing at us.
 """
 
 import inspect
 import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+from evennia_environment.refusal import refuse
 
 
 def rejects_helper_arguments(helper):
@@ -97,14 +99,14 @@ class EnvironmentEffectType:
         than a type per mistake.
         """
         if not isinstance(self.key, str):
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType key {self.key!r} is a "
                 f"{type(self.key).__name__}, not a string. An effect type is "
                 f"looked up by name, so its key has to be one."
             )
 
         if not self.key:
-            raise ValueError(
+            refuse(
                 "EnvironmentEffectType key is empty. Without a key the effect "
                 "type names nothing and no terrain can declare a value for it."
             )
@@ -114,7 +116,7 @@ class EnvironmentEffectType:
         # first time an answer was checked against it. A clean boot and a crash
         # in play is the outcome these checks exist to prevent.
         if self.return_type is typing.Any:
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType {self.key!r} declares a return type of "
                 f"typing.Any, which cannot be used with isinstance. Declare "
                 f"object instead — every answer satisfies it."
@@ -123,7 +125,7 @@ class EnvironmentEffectType:
         # ``isinstance`` would raise ``TypeError`` rather than answering if
         # return_type is not a type, so this check has to come first.
         if not isinstance(self.return_type, type):
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType {self.key!r} declares a return type of "
                 f"{self.return_type!r}, which is a "
                 f"{type(self.return_type).__name__} rather than a type. Pass "
@@ -132,7 +134,7 @@ class EnvironmentEffectType:
 
         refusal = rejects_helper_arguments(self.default)
         if refusal:
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType {self.key!r} declares a default that "
                 f"{refusal}"
             )
@@ -142,7 +144,7 @@ class EnvironmentEffectType:
         if isinstance(self.requires, str) or not isinstance(
             self.requires, (tuple, list)
         ):
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType {self.key!r} declares requires as "
                 f"{self.requires!r}. It names the kwargs a call site must pass, "
                 f"so it is a tuple of names — ('actor',), not 'actor'."
@@ -150,7 +152,7 @@ class EnvironmentEffectType:
 
         not_names = [name for name in self.requires if not isinstance(name, str)]
         if not_names:
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffectType {self.key!r} declares requires "
                 f"containing {not_names!r}. Every entry is a kwarg name, so "
                 f"every entry is a string."
@@ -159,56 +161,6 @@ class EnvironmentEffectType:
         # Normalised so the stored value is always a tuple, whatever was
         # passed. object.__setattr__ because the dataclass is frozen.
         object.__setattr__(self, "requires", tuple(self.requires))
-
-
-class EnvironmentEffectTypeRegistry:
-    """The master list of effect types a consumer has declared.
-
-    Two jobs, and no more: say whether a key is registered, so a terrain's
-    declarations can be validated against the list, and hand back the
-    ``EnvironmentEffectType`` so a caller can read its default. See
-    docs/test-plan.md § ER.
-    """
-
-    def __init__(self):
-        self._effect_types = {}
-
-    def register(self, effect_type: EnvironmentEffectType) -> None:
-        """Add an effect type to the list, refusing a key already spoken for.
-
-        Raises immediately rather than collecting, for the same reason
-        ``EnvironmentEffectType`` does: the call is in the consumer's own
-        module, at a line they wrote, and the traceback should point there.
-        """
-        if not isinstance(effect_type, EnvironmentEffectType):
-            raise ValueError(
-                f"Cannot register {effect_type!r}: register() takes an "
-                f"EnvironmentEffectType, not a {type(effect_type).__name__}."
-            )
-
-        # The key is the identity. A default is a helper, and two
-        # separately-written declarations hold different function objects even
-        # when they read identically — so "is this the same declaration" has no
-        # answer worth trusting, and a second one under a taken key means one of
-        # them is being ignored either way.
-        existing = self._effect_types.get(effect_type.key)
-        if existing is not None:
-            raise ValueError(
-                f"EnvironmentEffectType {effect_type.key!r} is already "
-                f"registered as {existing!r}. One key is one effect type; "
-                f"remove whichever declaration is wrong."
-            )
-
-        self._effect_types[effect_type.key] = effect_type
-
-    def get(self, key: str) -> Optional[EnvironmentEffectType]:
-        """Return the effect type registered under ``key``, or ``None``.
-
-        ``None`` is an ordinary answer rather than a failure: validating a
-        terrain means asking about keys that may not be registered, and that is
-        the question being asked.
-        """
-        return self._effect_types.get(key)
 
 
 @dataclass(frozen=True)
@@ -237,7 +189,7 @@ class EnvironmentEffect:
         """
         # First, so the refusal below has a key to name.
         if not isinstance(self.effect_type, EnvironmentEffectType):
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffect was given {self.effect_type!r} as its "
                 f"effect type, which is a {type(self.effect_type).__name__} "
                 f"rather than an EnvironmentEffectType. Pass the declared type "
@@ -250,7 +202,7 @@ class EnvironmentEffect:
         # an answer on the call path, where it covers every contribution.
         refusal = rejects_helper_arguments(self.helper)
         if refusal:
-            raise ValueError(
+            refuse(
                 f"EnvironmentEffect for {self.effect_type.key!r} declares a "
                 f"helper that {refusal}"
             )
@@ -280,7 +232,7 @@ def one_effect_per_type(effects, declared_by):
     if isinstance(effects, (str, EnvironmentEffect)) or not isinstance(
         effects, (tuple, list)
     ):
-        raise ValueError(
+        refuse(
             f"{declared_by} declares effects as {effects!r}. It is a tuple of "
             f"EnvironmentEffect — an empty one if nothing is declared."
         )
@@ -288,7 +240,7 @@ def one_effect_per_type(effects, declared_by):
     seen = {}
     for effect in effects:
         if not isinstance(effect, EnvironmentEffect):
-            raise ValueError(
+            refuse(
                 f"{declared_by} declares {effect!r} among its effects, which "
                 f"is a {type(effect).__name__} rather than an "
                 f"EnvironmentEffect."
@@ -298,7 +250,7 @@ def one_effect_per_type(effects, declared_by):
         # there is no ordering to configure and no merge rule to write.
         key = effect.effect_type.key
         if key in seen:
-            raise ValueError(
+            refuse(
                 f"{declared_by} declares two effects for {key!r}. One "
                 f"declaration per effect type: the second would be ignored, "
                 f"whether or not it says the same thing."
@@ -307,7 +259,3 @@ def one_effect_per_type(effects, declared_by):
 
     return tuple(effects)
 
-
-# The list a consumer registers against, from the module they declare their game
-# in. One instance, because one game has one master list.
-ENVIRONMENT_EFFECT_TYPES = EnvironmentEffectTypeRegistry()

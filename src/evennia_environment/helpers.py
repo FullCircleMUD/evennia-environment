@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from evennia_environment.effects import rejects_helper_arguments
+from evennia_environment.refusal import refuse
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,7 @@ class Chain:
         for helper in helpers:
             refusal = rejects_helper_arguments(helper)
             if refusal:
-                raise ValueError(f"Chain was given a member that {refusal}")
+                refuse(f"Chain was given a member that {refusal}")
 
         self._helpers = helpers
 
@@ -123,7 +124,7 @@ def _refuse_a_non_number(value, helper, field):
     take ``Multiply(True)`` and quietly scale by one.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(
+        refuse(
             f"{helper} was given {value!r} as its {field}, which is a "
             f"{type(value).__name__}. It has to be a number."
         )

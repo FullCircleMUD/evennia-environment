@@ -9,11 +9,10 @@ dependency**, or **no coupling** — followed either by the constraints that app
 clearance stating *why* it is clear in terms of what this library does. "No known issues" is not a
 clearance.
 
-**The library is scaffolded and implements nothing**, so most clearances below rest on that rather
-than on a design decision. They are provisional in the strongest sense: re-read every one of them as
-each surface lands. What is already settled is that the library holds two contributors — terrain,
-declared by the consumer, and weather, derived from the calendar — and answers questions about a
-room rather than acting on one.
+The shape the clearances below rest on: the library holds two contributors — terrain, declared by the
+consumer, and weather, derived from the calendar — answers questions about a room rather than acting
+on one, and reaches nothing outside its own module except the calendar it reads and the log it
+writes.
 
 **A recurring theme, stated once.** Several siblings are ones a consumer would plausibly *compose*
 with this library — hunger that rises faster in the heat, spawning that changes in a storm, an NPC
@@ -39,10 +38,14 @@ re-creates. That is settled by how a room carries its terrain, which is open —
 
 ## evennia-calendar
 
-**Hard dependency.** Weather is derived from the calendar: the day number keys the daily value,
-`season` selects the band and the clamp, and `phase` selects the payload. The library also subscribes
-to `season_changed` and `phase_changed` rather than running a clock of its own. `pyproject.toml`
-declares it and `tests/test_settings.py` installs it.
+**Hard dependency, at runtime and not only on paper.** The day number is what the weather band is
+derived from, `season` shifts that band, and `phase` decides whether it is dark. The library connects
+to `day_changed` and `phase_changed` in its own `ready()` rather than running a clock, and holds both
+answers between signals so nothing asks the calendar on a read.
+
+A game must start the calendar's clock. Without it neither signal fires, and the weather stays
+whatever it was at boot. `pyproject.toml` declares the dependency and `tests/test_settings.py`
+installs it.
 
 Nothing flows the other way. The calendar knows nothing about weather, and its own
 `interoperability.md` records the weather layer as a dependant rather than a dependency.
@@ -60,6 +63,16 @@ time settings.
 `[TBD — needs discussion: whether the library owns any tables at all. Nothing so far needs storing.
 If that changes, the cascade is how the alias is declared, and this section becomes a hard
 dependency.]`
+
+## evennia-effects-conditions
+
+**No coupling.** Neither library imports the other, and they answer different questions: conditions
+are things a character carries, and an environment effect is something a place contributes when
+asked.
+
+The one place they touch is naming. Both would otherwise call their central object `Effect`, and a
+consumer runs both — so this library's is `EnvironmentEffect`, and the declaration it pairs with is
+`EnvironmentEffectType`.
 
 ## evennia-environment
 
@@ -88,6 +101,10 @@ into an NPC prompt is composition in the consumer's code.
 library emits goes through that binding to `environment.log`. The library does not run without it —
 `pyproject.toml` declares it. Nothing flows the other way.
 
+What it emits is refusals and nothing else — every one, at ERROR, through the routes in
+[design.md](design.md) § Everything that raises, logs. A boot refusal is written in the window before
+the reactor exists, which the extension handles synchronously.
+
 ## evennia-message-bus
 
 **No coupling.** Neither library imports the other. The bus coordinates state between processes;
@@ -109,6 +126,14 @@ layer; this library answers questions inside the Server process and touches no c
 The clock synchronisation that multiplex owns for the calendar reaches this library second-hand:
 instances that disagree about the date disagree about the weather. That constraint belongs to the
 calendar and is documented there.
+
+## evennia-procedural-dungeons
+
+**No coupling** today, and a plausible pairing. A generated dungeon is rooms, and rooms carry a
+terrain — so a generator wanting its caverns to have one would assign `terrain` like any other
+builder, with no import of this library beyond the enum the consumer declared.
+
+Nothing is designed, and nothing here anticipates it.
 
 ## evennia-scaling
 
@@ -143,20 +168,37 @@ visibility range, which would make targeting a dependency. Nothing is designed y
 
 ## evennia-world-builder
 
-**No coupling** today, and this is the pairing most likely to change. World-builder writes rooms and
-exits from YAML, and a room's terrain is exactly the kind of field a builder would author there.
+**No coupling.** Neither library imports the other, and neither knows the other exists. How a room
+came to be built is not this library's business — a YAML build, a builder command, a migration
+script or someone typing `@py` all reach the terrain property the same way and are validated the
+same way.
 
-`[TBD — needs discussion: how a room carries its terrain — see [test-plan.md](test-plan.md) § Open
-decisions. If the answer is a world-builder field, this section becomes a real relationship and the
-constraint is documented by whichever library owns the field.]`
+**Clear to use together, with nothing to wire up.** A YAML `attributes` entry naming a terrain by its
+member's value goes through the property like any other assignment:
+
+```yaml
+attributes:
+  - key: terrain
+    value: mountains
+```
+
+That works because the property takes a terrain's name as a string as well as its enum member — which
+it does for every text source, not for any one builder. A YAML field, a typed command argument and a
+CSV column all hold text and none of them can hold an enum member.
 
 ## evennia-yaml-reader
 
-**No coupling** today. yaml-reader depends only on `pyyaml`, has no Evennia dependency and touches no
+**No coupling.** yaml-reader depends only on `pyyaml`, has no Evennia dependency and touches no
 database.
 
-`[TBD — needs discussion: whether terrain and weather tables are authored in YAML as well as in
-Python. Registration is the substrate either way; a YAML loader would make this a hard dependency.]`
+Terrain and weather tables are Python and stay Python: an effect is a callable, and a YAML file
+cannot hold one. That is a boundary rather than a gap — world *content* is YAML, and a room's terrain
+reaches it as a string.
+
+## fcm-subscriptions
+
+**No coupling.** Different domain entirely — subscriptions are an account's billing state and this
+library answers questions about places.
 
 ## fcm-telemetry-spawn
 

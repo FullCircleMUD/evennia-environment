@@ -5,7 +5,10 @@ Every case the library commits to lives in docs/test-plan.md, and every test
 function here carries its case ID as its docstring so the trail reads both ways.
 """
 
+import ast
 import dataclasses
+import inspect
+import os
 from unittest import TestCase, mock
 
 # The TP cases create real objects, so they need a database around them. The
@@ -26,13 +29,14 @@ from evennia_environment.config import (
 )
 
 import evennia_environment
+from evennia_environment import effects, helpers, terrain, weather
+from evennia_environment.refusal import refuse, refuse_attribute
 from evennia_environment import (
     Add,
     Chain,
     Constant,
     EnvironmentEffect,
     EnvironmentEffectType,
-    EnvironmentEffectTypeRegistry,
     Multiply,
     RoundDown,
     RoundUp,
@@ -568,84 +572,6 @@ class CurrentWeatherTests(TestCase):
 MOVEMENT_COST = EnvironmentEffectType(
     key="movement_cost", return_type=float, default=_constant(1.0)
 )
-
-
-class EffectTypeRegistryTests(TestCase):
-    """ER-01 — ER-03, ER-11. Registering, and reading back what was registered.
-
-    Every case builds its own registry rather than touching the module-level
-    ``ENVIRONMENT_EFFECT_TYPES``, so nothing leaks between runs.
-    """
-
-    def test_er_01_a_registered_effect_type_is_returned_by_its_key(self):
-        """ER-01"""
-        registry = EnvironmentEffectTypeRegistry()
-        registry.register(MOVEMENT_COST)
-
-        self.assertIs(registry.get("movement_cost"), MOVEMENT_COST)
-
-    def test_er_02_refuses_something_that_is_not_an_effect_type(self):
-        """ER-02"""
-        registry = EnvironmentEffectTypeRegistry()
-
-        for not_an_effect_type in ("movement_cost", {"movement_cost": 1.0}, None):
-            with self.subTest(value=not_an_effect_type):
-                with self.assertRaises(ValueError):
-                    registry.register(not_an_effect_type)
-
-    def test_er_03_a_fresh_registry_has_nothing_registered(self):
-        """ER-03"""
-        self.assertIsNone(EnvironmentEffectTypeRegistry().get("movement_cost"))
-
-    def test_er_11_an_unregistered_key_returns_none(self):
-        """ER-11"""
-        registry = EnvironmentEffectTypeRegistry()
-        registry.register(MOVEMENT_COST)
-
-        self.assertIsNone(registry.get("health_effect"))
-
-
-class EffectTypeRegistryDuplicateTests(TestCase):
-    """ER-04, ER-06. One key, one declaration, whatever it holds."""
-
-    def test_er_04_refuses_a_second_effect_type_under_a_taken_key(self):
-        """ER-04"""
-        registry = EnvironmentEffectTypeRegistry()
-        registry.register(MOVEMENT_COST)
-
-        with self.assertRaises(ValueError):
-            registry.register(
-                EnvironmentEffectType(
-                    key="movement_cost", return_type=int, default=_constant(1)
-                )
-            )
-
-    def test_er_06_the_duplicate_refusal_names_the_key(self):
-        """ER-06"""
-        registry = EnvironmentEffectTypeRegistry()
-        registry.register(MOVEMENT_COST)
-
-        with self.assertRaises(ValueError) as caught:
-            registry.register(
-                EnvironmentEffectType(
-                    key="movement_cost", return_type=int, default=_constant(1)
-                )
-            )
-
-        self.assertIn("movement_cost", str(caught.exception))
-
-
-class EffectTypeRegistryIsolationTests(TestCase):
-    """ER-10. The store is per-instance, not a mutable class attribute."""
-
-    def test_er_10_two_registries_do_not_share_state(self):
-        """ER-10"""
-        registry = EnvironmentEffectTypeRegistry()
-        other = EnvironmentEffectTypeRegistry()
-
-        registry.register(MOVEMENT_COST)
-
-        self.assertIsNone(other.get("movement_cost"))
 
 
 class EffectConstructionTests(TestCase):
@@ -1448,6 +1374,404 @@ class ConfigTests(TestCase):
         self.assertIs(terrain_enum(), Terrain)
 
 
+#: A module whose import raises. The setting naming it is well formed, so the
+#: refusal is about the consumer's own code rather than about the setting.
+RAISING_MODULE = "tests.raising_terrain_module.Terrain"
+
+
+class LogFileMixin:
+    """Read the suite's log files back, for the cases that assert delivery.
+
+    Shared by the CF and DR logging cases: both prove a line reached a file
+    rather than that a call was made, and the handle-caching trap below is the
+    kind of thing that is only ever solved once.
+    """
+
+    def _read_back_logs(self):
+        """Everything under the suite's LOG_DIR, as one string."""
+        from django.conf import settings
+
+        text = []
+        for name in sorted(os.listdir(settings.LOG_DIR)):
+            if name.endswith(".log"):
+                path = os.path.join(settings.LOG_DIR, name)
+                with open(path, encoding="utf-8") as handle:
+                    text.append(handle.read())
+
+        return "\n".join(text)
+
+    def _clear_logs(self):
+        """Empty LOG_DIR's files, so a line read back was written by this test.
+
+        Truncated, never removed: Evennia's ``_open_log_file`` caches the
+        handle after the first write, and removing the file leaves that handle
+        appending to an unlinked inode — every later line silently vanishes. An
+        append-mode handle seeks to the end on each write, so a truncated file
+        stays live.
+        """
+        from django.conf import settings
+
+        for name in os.listdir(settings.LOG_DIR):
+            if name.endswith(".log"):
+                with open(os.path.join(settings.LOG_DIR, name), "w"):
+                    pass
+
+
+class ConfigLoggingTests(LogFileMixin, TestCase):
+    """CF-19 — CF-23. What a boot refusal leaves behind on disk.
+
+    Read back from ``LOG_DIR`` rather than by mocking ``environment_log``: a
+    mocked delivery case asserts only that a call was made, and passes happily
+    while no line ever reaches a file. That is the failure these cases exist to
+    catch, so they open the file.
+
+    The check runs from ``AppConfig.ready()`` during ``django.setup()``, before
+    the reactor exists — evennia-logging-extension writes that window
+    synchronously, which is what makes a boot refusal logable at all.
+    """
+
+    def setUp(self):
+        terrain_enum.cache_clear()
+        terrain_types.cache_clear()
+        dark_watches.cache_clear()
+        self._clear_logs()
+
+    def tearDown(self):
+        terrain_enum.cache_clear()
+        terrain_types.cache_clear()
+        dark_watches.cache_clear()
+
+    def test_cf_19_a_refusal_is_logged_to_disk_at_error(self):
+        """CF-19"""
+        with override_settings(**{SETTING_TERRAIN_ENUM: None}):
+            with self.assertRaises(ImproperlyConfigured):
+                check_settings()
+
+        logged = self._read_back_logs()
+
+        # ERROR rather than WARN: the instance does not start.
+        self.assertIn("[ERROR]", logged)
+        self.assertIn(SETTING_TERRAIN_ENUM, logged)
+
+    def test_cf_20_the_log_line_and_the_exception_carry_the_same_text(self):
+        """CF-20"""
+        # Two problems, in two settings, so this proves the whole collected
+        # list reaches the log rather than just the first line of it. Every
+        # refusal funnels through the one raise, so the equality carries every
+        # other reason across with it.
+        with override_settings(
+            **{
+                SETTING_TERRAIN_ENUM: "tests.terrain_enums.NumberedTerrain",
+                SETTING_TERRAIN_TYPES: None,
+            }
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        message = str(caught.exception)
+
+        self.assertEqual(message.count(PROBLEM_PREFIX), 2)
+        self.assertIn(message, self._read_back_logs())
+
+    def test_cf_21_a_terrain_enum_that_will_not_import_logs_the_cause(self):
+        """CF-21"""
+        with override_settings(**{SETTING_TERRAIN_ENUM: RAISING_MODULE}):
+            with self.assertRaises(ImproperlyConfigured):
+                check_settings()
+
+        logged = self._read_back_logs()
+
+        # "could not be loaded" on its own tells a consumer what they already
+        # know. The error underneath it is the part they can act on.
+        self.assertIn(SETTING_TERRAIN_ENUM, logged)
+        self.assertIn("deliberate failure on import", logged)
+
+    def test_cf_22_terrain_types_that_will_not_import_log_the_cause(self):
+        """CF-22"""
+        with override_settings(**{SETTING_TERRAIN_TYPES: RAISING_MODULE}):
+            with self.assertRaises(ImproperlyConfigured):
+                check_settings()
+
+        logged = self._read_back_logs()
+
+        self.assertIn(SETTING_TERRAIN_TYPES, logged)
+        self.assertIn("deliberate failure on import", logged)
+
+    def test_cf_23_a_passing_check_writes_no_log_line(self):
+        """CF-23"""
+        check_settings()
+
+        self.assertEqual(self._read_back_logs().strip(), "")
+
+
+#: The modules whose refusals all route through ``refuse()``. DR-07 reads
+#: their source; DR-03 to DR-06 exercise one refusal in each.
+DECLARATION_MODULES = (effects, helpers, terrain, weather)
+
+
+class DeclarationRefusalTests(LogFileMixin, TestCase):
+    """DR-01 — DR-08. The one route a declaration refusal takes.
+
+    Every refusal across four modules goes through ``refuse()``, so one delivery
+    case covers them and DR-07 holds the route closed.
+    """
+
+    def setUp(self):
+        self._clear_logs()
+
+    def test_dr_01_logs_at_error_then_raises_a_value_error(self):
+        """DR-01"""
+        with self.assertRaises(ValueError):
+            refuse("a declaration that cannot be used")
+
+        logged = self._read_back_logs()
+
+        # ERROR rather than WARN: the consumer's game does not have the thing
+        # they wrote down.
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("a declaration that cannot be used", logged)
+
+    def test_dr_02_the_log_line_and_the_exception_carry_the_same_text(self):
+        """DR-02"""
+        with self.assertRaises(ValueError) as caught:
+            refuse("a declaration that cannot be used")
+
+        self.assertIn(str(caught.exception), self._read_back_logs())
+
+    def test_dr_03_a_refused_effect_declaration_lands_a_line(self):
+        """DR-03"""
+        with self.assertRaises(ValueError):
+            EnvironmentEffectType(
+                key=42, return_type=float, default=_constant(1.0)
+            )
+
+        self.assertIn("[ERROR]", self._read_back_logs())
+
+    def test_dr_04_a_refused_terrain_declaration_lands_a_line(self):
+        """DR-04"""
+        with self.assertRaises(ValueError):
+            TerrainType(key="")
+
+        self.assertIn("[ERROR]", self._read_back_logs())
+
+    def test_dr_05_a_refused_weather_declaration_lands_a_line(self):
+        """DR-05"""
+        with self.assertRaises(ValueError):
+            WeatherType(key="")
+
+        self.assertIn("[ERROR]", self._read_back_logs())
+
+    def test_dr_06_a_refused_helper_declaration_lands_a_line(self):
+        """DR-06"""
+        with self.assertRaises(ValueError):
+            Multiply("twice")
+
+        self.assertIn("[ERROR]", self._read_back_logs())
+
+    def test_dr_07_no_declaration_module_raises_a_value_error_directly(self):
+        """DR-07"""
+        # Structural, because the risk is a site left behind rather than a
+        # site that misbehaves — and no sampling of call sites can see the one
+        # that was missed. Reads the source rather than exercising every site,
+        # so the next one added is caught too.
+        for module in DECLARATION_MODULES:
+            with self.subTest(module=module.__name__):
+                source = inspect.getsource(module)
+
+                # Sorted, because ast.walk is breadth-first and an unsorted
+                # list of line numbers is a worse thing to be handed than a
+                # sorted one.
+                direct = sorted(
+                    node.lineno
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Raise)
+                    and isinstance(node.exc, ast.Call)
+                    and isinstance(node.exc.func, ast.Name)
+                    and node.exc.func.id == "ValueError"
+                )
+
+                self.assertEqual(
+                    direct,
+                    [],
+                    f"{module.__name__} raises ValueError directly at "
+                    f"{direct}. Every refusal goes through refuse(), or it "
+                    f"is not logged.",
+                )
+
+    def test_dr_08_an_accepted_declaration_writes_no_log_line(self):
+        """DR-08"""
+        EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_constant(1.0)
+        )
+        Multiply(2)
+
+        self.assertEqual(self._read_back_logs().strip(), "")
+
+
+class RoomRefusalLoggingTests(LogFileMixin, DjangoTestCase):
+    """RL-01 — RL-06. What a refused assignment leaves behind on disk.
+
+    A world build applies content to hundreds of rooms and may well catch per
+    room and carry on, so the log is where the operator finds which one failed.
+
+    Each case clears the log after building its room rather than before:
+    creating an Evennia object is not this library's business and anything it
+    writes is not what the case is asserting.
+    """
+
+    def _room(self, key="Mossy Hollow"):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        return create_object(TerrainRoom, key=key, nohome=True)
+
+    def test_rl_01_logs_at_error_then_raises_an_attribute_error(self):
+        """RL-01"""
+        self._clear_logs()
+
+        with self.assertRaises(AttributeError):
+            refuse_attribute("an assignment that cannot be made")
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("an assignment that cannot be made", logged)
+
+    def test_rl_02_the_log_line_and_the_exception_carry_the_same_text(self):
+        """RL-02"""
+        self._clear_logs()
+
+        with self.assertRaises(AttributeError) as caught:
+            refuse_attribute("an assignment that cannot be made")
+
+        self.assertIn(str(caught.exception), self._read_back_logs())
+
+    def test_rl_03_a_refused_write_once_change_lands_a_line(self):
+        """RL-03"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+        self._clear_logs()
+
+        with self.assertRaises(AttributeError):
+            room.terrain = Terrain.MOUNTAINS
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("Mossy Hollow", logged)
+
+    def test_rl_04_a_refused_terrain_name_lands_a_line(self):
+        """RL-04"""
+        room = self._room()
+        self._clear_logs()
+
+        with self.assertRaises(AttributeError):
+            room.terrain = "swmap"
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("Mossy Hollow", logged)
+        self.assertIn("swmap", logged)
+
+    def test_rl_05_a_refused_value_of_the_wrong_kind_lands_a_line(self):
+        """RL-05"""
+        room = self._room()
+        self._clear_logs()
+
+        with self.assertRaises(AttributeError):
+            room.terrain = 42
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("Mossy Hollow", logged)
+
+    def test_rl_06_an_accepted_assignment_writes_no_log_line(self):
+        """RL-06"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        self._clear_logs()
+
+        room.terrain = Terrain.SWAMP
+
+        self.assertEqual(self._read_back_logs().strip(), "")
+
+
+class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
+    """RL-07 — RL-10. What a refusal on the call path leaves behind on disk.
+
+    Nobody is watching a console when these fire, and `resolve()` is reached
+    from tickers and scripts as well as commands — so the library's own file is
+    where the consumer finds them.
+    """
+
+    def setUp(self):
+        self._clear_logs()
+
+    def _type(self, requires=(), default=None):
+        return EnvironmentEffectType(
+            key="movement_cost",
+            return_type=float,
+            default=default or _constant(1.0),
+            requires=requires,
+        )
+
+    def test_rl_07_a_missing_required_kwarg_lands_a_line(self):
+        """RL-07"""
+        effect_type = self._type(requires=("actor",))
+
+        with self.assertRaises(ValueError):
+            resolve(effect_type)
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("actor", logged)
+
+    def test_rl_08_a_wrong_type_lands_a_line_naming_the_contributor(self):
+        """RL-08"""
+        effect_type = self._type()
+        terrain = TerrainType(
+            key="swamp",
+            effects=(EnvironmentEffect(effect_type, Constant("thick")),),
+            weather_slots=_ten_still_slots(),
+        )
+
+        with self.assertRaises(ValueError):
+            resolve(effect_type, terrain_type=terrain)
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        # Which of the three contributors got it wrong, not just that one did.
+        self.assertIn("swamp", logged)
+
+    def test_rl_09_the_same_problem_twice_lands_two_lines(self):
+        """RL-09"""
+        effect_type = self._type(requires=("actor",))
+
+        for _ in range(2):
+            with self.assertRaises(ValueError):
+                resolve(effect_type)
+
+        # Deliberately not suppressed. resolve() is on the per-action path, so
+        # a log filling with one refusal is how a consumer finds out they have
+        # something to fix — suppression would make the symptom quieter and
+        # cost code carried for the life of the library.
+        self.assertEqual(self._read_back_logs().count("[ERROR]"), 2)
+
+    def test_rl_10_a_resolve_that_answers_writes_no_log_line(self):
+        """RL-10"""
+        self.assertEqual(resolve(self._type()), 1.0)
+
+        self.assertEqual(self._read_back_logs().strip(), "")
+
+
 class RoomTerrainDescriptionTests(DjangoTestCase):
     """RM-03, RM-04, RM-08. What a room says about its terrain.
 
@@ -1616,7 +1940,8 @@ class TerrainPropertyTests(DjangoTestCase):
         from tests.terrain_enums import Terrain
 
         room = self._room()
-        # The world-builder path: a YAML file can only supply a string.
+        # The bulk-content path: a YAML field or a CSV column holds text, not
+        # an enum member.
         room.terrain = "swamp"
 
         self.assertIs(room.terrain, Terrain.SWAMP)
@@ -1657,6 +1982,35 @@ class TerrainPropertyTests(DjangoTestCase):
 
         with self.assertRaises(AttributeError):
             room.terrain = "swmap"
+
+    def test_tp_15_the_refusal_names_the_room(self):
+        """TP-15"""
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        room = create_object(TerrainRoom, key="Mossy Hollow", nohome=True)
+
+        with self.assertRaises(AttributeError) as caught:
+            room.terrain = "swmap"
+
+        # Both, because two rooms can carry the same key and a build applying
+        # content to hundreds of them needs the one that failed.
+        self.assertIn("Mossy Hollow", str(caught.exception))
+        self.assertIn(room.dbref, str(caught.exception))
+
+    def test_tp_16_an_unknown_name_does_not_chain_the_enums_own_error(self):
+        """TP-16"""
+        room = self._room()
+
+        with self.assertRaises(AttributeError) as caught:
+            room.terrain = "swmap"
+
+        # The enum lookup raises a ValueError on its way to this refusal, and
+        # showing it under the refusal points a consumer at the lookup rather
+        # than at the name they typed.
+        self.assertTrue(caught.exception.__suppress_context__)
+        self.assertIsNone(caught.exception.__cause__)
 
     def test_tp_05_refuses_a_value_that_is_neither_member_nor_string(self):
         """TP-05"""

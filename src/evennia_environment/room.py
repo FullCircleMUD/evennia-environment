@@ -19,10 +19,20 @@ See docs/test-plan.md § TP.
 from evennia.typeclasses.attributes import AttributeProperty
 
 from evennia_environment.config import terrain_enum, terrain_types
+from evennia_environment.refusal import refuse_attribute
 # Aliased: the mixin exposes a ``current_weather`` of its own, and two of
 # that name in one module reads as a mistake even where it is not.
 from evennia_environment.resolve import resolve
 from evennia_environment.weather import current_weather as _weather_in_force
+
+
+def _named(obj):
+    """Return how a room is identified in a refusal.
+
+    Both the key and the dbref, because two rooms can carry the same key and
+    the one that failed has to be findable from the line alone.
+    """
+    return f"{obj.key} ({obj.dbref})"
 
 
 class TerrainProperty(AttributeProperty):
@@ -54,16 +64,16 @@ class TerrainProperty(AttributeProperty):
         stored = obj.attributes.get(
             self._key, category=self._category, strattr=True
         )
-        incoming = self._to_stored(value)
+        incoming = self._to_stored(value, obj)
 
         # Write-once, and identical is not a write. A room is given its terrain
         # when it is built; re-applying the same content is harmless, and any
         # other change — including clearing it — is refused.
         if stored is not None and incoming != stored:
-            raise AttributeError(
-                f"{self._key} is already {stored!r} and cannot be changed to "
-                f"{value!r}. A room's terrain is set when it is built and does "
-                f"not change in play."
+            refuse_attribute(
+                f"{_named(obj)}: {self._key} is already {stored!r} and cannot "
+                f"be changed to {value!r}. A room's terrain is set when it is "
+                f"built and does not change in play."
             )
 
         return incoming
@@ -75,12 +85,16 @@ class TerrainProperty(AttributeProperty):
 
         return terrain_enum()(value)
 
-    def _to_stored(self, value):
+    def _to_stored(self, value, obj):
         """Return what ``value`` should be stored as, or refuse it.
 
         A member gives its value; the value itself is taken as naming that
         member. Both forms exist because YAML world content can only supply the
         string, and library code will naturally hand over the member.
+
+        ``obj`` is here only to name the room in a refusal. A build applying
+        content to hundreds of them needs the one that failed, and without this
+        the message carries the bad value and nothing to search for.
         """
         if value is None:
             return None
@@ -92,20 +106,24 @@ class TerrainProperty(AttributeProperty):
             try:
                 return terrain_enum()(value).value
             except ValueError:
-                raise AttributeError(
-                    f"{self._key} cannot be {value!r}: no terrain has that "
-                    f"name. Declared are "
-                    f"{', '.join(repr(m.value) for m in terrain_enum())}."
-                ) from None
+                # The enum's own ValueError is suppressed: the consumer's
+                # mistake is the name, not the lookup that went looking for it.
+                refuse_attribute(
+                    f"{_named(obj)}: {self._key} cannot be {value!r}: no "
+                    f"terrain has that name. Declared are "
+                    f"{', '.join(repr(m.value) for m in terrain_enum())}.",
+                    suppress_context=True,
+                )
 
-        raise AttributeError(
-            f"{self._key} cannot be {value!r}. It must be a member of "
-            f"{terrain_enum().__name__}, or the name of one as a string."
+        refuse_attribute(
+            f"{_named(obj)}: {self._key} cannot be {value!r}. It must be a "
+            f"member of {terrain_enum().__name__}, or the name of one as a "
+            f"string."
         )
 
 
 class EnvironmentRoomMixin:
-    """What a room answers about its surroundings. A placeholder.
+    """What a room answers about its surroundings.
 
     Mixed into a consumer's own room typeclass. It brings ``terrain`` with it —
     the property reads the game's enum from the setting, so there is nothing
@@ -116,9 +134,8 @@ class EnvironmentRoomMixin:
         class Room(EnvironmentRoomMixin, DefaultRoom):
             pass
 
-    Every method here is unimplemented. Two things are missing under them: the
-    route from the stored terrain to its ``TerrainType``, and which of the
-    terrain's ten weather slots is active. See docs/test-plan.md § RM.
+    A thin wrapper over ``resolve()``: it finds the room's terrain type and the
+    weather in force, and hands both over. See docs/test-plan.md § RM.
     """
 
     terrain = TerrainProperty()
