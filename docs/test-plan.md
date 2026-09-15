@@ -826,27 +826,28 @@ operation; there is no history to fix up.
 
 ## RM — `EnvironmentRoomMixin`
 
-**A placeholder.** The three methods exist with their real signatures and no behaviour. Mixed into a
-consumer's own room typeclass, beside their terrain declaration — the mixin does not declare
-`terrain` itself, because the property needs the consumer's enum and the library cannot know it.
+What a room answers about its surroundings. Mixed into a consumer's own room typeclass, which
+declares nothing — the mixin brings `terrain` with it, and the property reads the game's enum from
+the setting.
 
 ```python
 class Room(EnvironmentRoomMixin, DefaultRoom):
-    terrain = TerrainProperty(Terrain)
+    pass
 ```
 
-**Two things are missing under every one of them**, and no case below can be covered until they exist:
-the route from the stored terrain to its `TerrainType`, and which of the terrain's ten weather slots
-is active.
+```python
+cost = room.get_environment_effect(MOVE_COST, actor=character)
+line = room.get_weather_description()
+```
 
-`get_weather_description(day=True)` takes the day-or-night flag as an argument rather than working it
-out, because which watches are dark is still undeclared. That argument goes when the library can ask
-the calendar itself.
+**Every method is a thin wrapper.** The room finds its terrain and its weather; `resolve()` does the
+work. `get_environment_effect` passes both to it, and both being optional is what lets a room with no
+terrain answer with the effect type's default rather than raising.
 
 | ID | Case | Test function |
 |---|---|---|
-| RM-01 | `get_environment_effect` answers through this room's terrain and its active weather | |
-| RM-02 | A room with no terrain still answers — the effect type's default | |
+| RM-01 | `get_environment_effect` answers through this room's terrain and its active weather | `test_rm_01_answers_through_the_terrain_and_the_weather` |
+| RM-02 | A room with no terrain still answers — the effect type's default | `test_rm_02_a_room_with_no_terrain_answers_the_default` |
 | RM-03 | `get_terrain_description` returns this terrain's description, found by matching the stored member's value against the declared terrain types' keys | `test_rm_03_returns_the_terrains_description` |
 | RM-04 | `get_terrain_description` on a room with no terrain returns `None` | `test_rm_04_a_room_with_no_terrain_has_no_description` |
 | RM-08 | `get_terrain_description` on a terrain declaring no description returns `None` rather than raising | `test_rm_08_a_terrain_with_no_description_returns_none` |

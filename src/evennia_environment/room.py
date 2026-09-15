@@ -21,6 +21,7 @@ from evennia.typeclasses.attributes import AttributeProperty
 from evennia_environment.config import terrain_enum, terrain_types
 # Aliased: the mixin exposes a ``current_weather`` of its own, and two of
 # that name in one module reads as a mistake even where it is not.
+from evennia_environment.resolve import resolve
 from evennia_environment.weather import current_weather as _weather_in_force
 
 
@@ -133,7 +134,14 @@ class EnvironmentRoomMixin:
         Returns:
             The value, of the effect type's declared return type.
         """
-        raise NotImplementedError
+        # Both optional: a room with no terrain has no weather either, and
+        # resolve answers with the effect type's default.
+        return resolve(
+            effect_type,
+            terrain_type=self.terrain_type,
+            weather_type=self.current_weather,
+            **kwargs,
+        )
 
     def get_terrain_description(self):
         """Return this room's terrain's description, or ``None``.

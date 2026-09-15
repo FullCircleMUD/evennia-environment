@@ -1555,6 +1555,41 @@ class RoomWeatherDescriptionTests(DjangoTestCase):
         self.assertIsNone(self._room().get_weather_description())
 
 
+class RoomEnvironmentEffectTests(DjangoTestCase):
+    """RM-01 — RM-02. What a key answers in a room."""
+
+    def _room(self, terrain=None):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        room = create_object(TerrainRoom, key="room", nohome=True)
+        if terrain is not None:
+            room.terrain = terrain
+        return room
+
+    def test_rm_01_answers_through_the_terrain_and_the_weather(self):
+        """RM-01"""
+        from evennia_environment import weather
+        from tests.terrain_enums import Terrain
+        from tests.terrain_tables import MOVE_COST
+
+        room = self._room(Terrain.SWAMP)
+
+        # The swamp adds one and the weather in every slot multiplies by three:
+        # 1.0 -> +1 -> 2.0 -> x3 -> 6.0. Either contributor alone gives 2.0 or
+        # 3.0, so the number shows both ran, and in which order.
+        with mock.patch.object(weather, "current_weather_band", return_value=1):
+            with mock.patch.object(weather, "is_dark", return_value=False):
+                self.assertEqual(room.get_environment_effect(MOVE_COST), 6.0)
+
+    def test_rm_02_a_room_with_no_terrain_answers_the_default(self):
+        """RM-02"""
+        from tests.terrain_tables import MOVE_COST
+
+        self.assertEqual(self._room().get_environment_effect(MOVE_COST), 1.0)
+
+
 class TerrainPropertyTests(DjangoTestCase):
     """TP-01 — TP-14. A room's terrain: enum in, string stored, enum out.
 
