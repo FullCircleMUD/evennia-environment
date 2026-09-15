@@ -59,9 +59,9 @@ time settings.
 
 **No coupling** today. This library owns no tables, needs no alias and ships no router.
 
-`[TBD — needs discussion: whether the library owns any tables at all. Nothing so far needs storing.
-If that changes, the cascade is how the alias is declared, and this section becomes a hard
-dependency.]`
+Terrain is declared in the consumer's own code and weather is derived from the day number, so there
+is nothing to store. If that ever changes, the cascade is how the alias would be declared and this
+section becomes a hard dependency.
 
 ## evennia-effects-conditions
 
@@ -161,9 +161,6 @@ its first principle.
 
 **No coupling.** Neither library imports the other. This library declares no `p_`, `f_` or `op_`
 callables and has no `targeting.py`.
-
-`[TBD — needs discussion: visibility. Search and perception predicates are a plausible consumer of a
-visibility range, which would make targeting a dependency. Nothing is designed yet.]`
 
 ## evennia-world-builder
 

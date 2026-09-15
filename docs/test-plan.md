@@ -918,9 +918,9 @@ held between rollovers.
 so the saving is not in caching the hash — it is in not asking at all. `day_changed` refreshes the
 stored value, and a read only computes when there is nothing stored. One calculation, two triggers.
 
-`[TBD — needs discussion: the roll happens at midnight, because that is when `day_changed` fires.
-Putting it at dawn needs a declared dawn watch, and no setting names one. The same declaration the
-day/night weather slots are waiting on.]`
+**The weather day turns over at midnight**, which falls inside the night watches — so one night is
+served by two bands, the watches before midnight reading the old day's slot and those after it the
+new day's. A slot's night weather covers half a night, not a whole one.
 
 ### The band itself
 
@@ -1047,40 +1047,9 @@ How the library is put together, and why, is in [design.md](design.md). This pag
 
 ## Open decisions
 
-What has to be decided before the surface it belongs to can be built. Each is a question raised in
-the design conversation and left open, not a gap to be filled by whoever reads this next.
+Nothing open. A question raised in the design conversation and left unresolved goes here, so a later
+session picks it up deliberately rather than inheriting an unagreed assumption.
 
-**Terrain**
-- `[TBD — needs discussion: whether every `Terrain` member must appear in the terrain table. A member
-  with none resolves against the null terrain, so the behaviour is settled — every key at its
-  default. What is open is whether that should be *accepted*, or refused at boot as an author's
-  oversight.]`
-- `[TBD — needs discussion: the accessor. Whether the keyed form is the whole API, or whether an
-  all-effects form exists alongside it for a builder or debug command, and what both are called.]`
-
-**Weather**
-
-- `[TBD — needs discussion: whether `WeatherType.effects` is stored as something immutable. Freezing
-  the dataclass stops the attribute being rebound but not the mapping being mutated, and because
-  effects resolve at read time, mutating it would change every room using that weather with nothing
-  refusing it. WT-02 pins the frozen attribute, not the mapping's contents.]`
-- `[TBD — needs discussion: whether an empty-string `description` or `transition_in` is refused. It
-  has the same effect as `None` and probably means the author meant to write something, but refusing
-  it is a rule nobody has asked for yet.]`
-- `[TBD — needs discussion: how the active slot is chosen for a day. The ten slots are the candidate
-  table and the draw is once per day; the function from day number and terrain to a slot is not
-  designed. Note that weather keyed on `day_of_year` turns over at midnight, in the middle of the
-  night watches — a weather-day offset from the calendar day is what puts the roll at dawn, and it
-  also decides whether a slot's night weather is the night after its day or the one before.]`
-- `[TBD — needs discussion: whether mountains are their own region or a terrain-driven index shift
-  on a neighbouring one. The ten-slot structure has no region layer in it, so this may already be
-  answered by terrain keying the slots — but that has not been said.]`
-- `[TBD — needs discussion: whether exposure stays three tiers or becomes a scalar.]`
-
-**The library**
-
-- `[TBD — needs discussion: whether the library owns any tables. Nothing so far needs storing —
-  terrain is declared and weather is derived from the day number — but this has not been ruled on.]`
 **Where this came from.** The design conversation is summarised in the umbrella's
 `ops/scratch/weather-library-exploration-2026-09-10.md`, which is a brainstorm and says so. Nothing
 in it is agreed. Treat a shape lifted from it as an invention until it has been discussed here.

@@ -19,7 +19,7 @@ See docs/test-plan.md § WT.
 """
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from evennia_environment.config import BAND_FLOOR, BANDS, SEASON_SHIFT

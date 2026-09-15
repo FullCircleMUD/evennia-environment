@@ -24,7 +24,7 @@ pointing at us.
 
 import inspect
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from evennia_environment.refusal import refuse
