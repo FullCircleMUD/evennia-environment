@@ -57,18 +57,37 @@ Every implementation decision must respect them.
    appears in this library's tests, the boundary has leaked.
 
 5. **A contribution is a callable the library routes, not a value it computes.** An effect holds
-   `f(value, **kwargs) -> value`. A declared number cannot express most of what a game wants —
-   natural light is terrain and the hour together — so the consumer writes the function and the
-   library never decides what a value means. The static case is a stock helper, so there is one shape
-   and one code path. Validation is what a declared value would have bought: the signature is checked
-   with `inspect` at the line declaring it, and the answer against the effect type's `return_type` at
+   `f(value, **kwargs) -> value`. A declared number cannot express most of what a game wants — a
+   stealth bonus depends on who is asking — so the consumer writes the function and the library never
+   decides what a value means. The static case is a stock helper, so there is one shape and one code
+   path. Validation is what a declared value would have bought: the signature is checked with
+   `inspect` at the line declaring it, and the answer against the effect type's `return_type` at
    every step of resolution.
+
+   **Day and night are the exception, and they are structural.** An effect declares two helpers and
+   `resolve()` picks — `EnvironmentEffect(key, Constant(True), night=Constant(False))`. A helper
+   reading the clock itself would work and hides the dependency: nothing in the declaration says the
+   value varies. Weather has had the same structure from the start in `WeatherSlot`.
 
 6. **Values are pulled, not pushed.** A call site asks the room what it contributes, at the moment it
    is already doing something. That is what lets movement price a room before entering it rather than
    charging on arrival — a query answers for any room, including one nobody is standing in.
 
-7. **The library answers for a room; it does not decide which room to ask.** Whether traversing an
+7. **The hour is the library's to read, not the caller's to pass.** `resolve()` calls `is_night()`
+   once per call and uses that answer for the slot and for both contributions' halves. Threading it
+   in from the room accessor was the first shape and it put one decision in two places. This is what
+   costs `resolve()` its calendar-free property, and the trade was made deliberately.
+
+8. **Absence is answered once, at `terrain_type`.** A room with no terrain of its own — none
+   assigned, or a member with no `TerrainType` — resolves against `NO_TERRAIN`, which declares
+   nothing. Nothing further down the path tests for a missing terrain. `room.terrain` still answers
+   `None`, which is where a builder's signal lives.
+
+9. **Night is the clock; dark is a place.** `is_night()` and `ENVIRONMENT_NIGHT_WATCHES` answer the
+   same everywhere in the game. Whether a room is dark is terrain and weather together and belongs to
+   a consumer's own effect key. Do not name a clock thing for darkness.
+
+10. **The library answers for a room; it does not decide which room to ask.** Whether traversing an
    exit charges for its origin, its destination or both is the consumer's movement rule. This is what
    keeps the library small, and the pressure to relax it will come from exits.
 
@@ -79,6 +98,9 @@ Every implementation decision must respect them.
 - **Atmospheric prose as the point.** Weather carries messages, but a library that only prints them is
   a script and a message table. The mechanical effect is the reason this exists.
 - **Equipment rust and spell-school modifiers.** Both were rejected. Do not re-propose either.
+- **A night half on an effect type's `default`.** A default is what answers when nobody declared
+  anything; a contribution is where a day/night difference belongs. One shared `EnvironmentEffect`
+  object reused across terrains is how it is declared once rather than repeated.
 
 ## Working conventions
 
@@ -91,6 +113,19 @@ Every implementation decision must respect them.
   `CLAUDE.md` and `README.md` stable; let `docs/` churn.
 - **License.** BSD 3-Clause. Source files carry an SPDX header on the first line
   (`# SPDX-License-Identifier: BSD-3-Clause`).
+- **`NO_TERRAIN` and `_NO_WEATHER` live in `terrain.py`, not `config.py`.** An exemption from
+  `library-standards.md` § module-level constants, for these two only — every other constant in this
+  library goes in `config.py`, and a new one should too.
+
+  **Why they cannot move.** Both are built by calling `TerrainType(...)` and `WeatherType(...)`, so
+  `config.py` would have to import those at module scope. `terrain.py` already imports `SLOT_NUMBERS`
+  from `config.py`, so that import closes a cycle. `config.py` works around the same cycle in
+  `_check_terrain_types` by importing `TerrainType` inside the function — which is available to a
+  check and not to a constant, because a module-level constant cannot be built from a function-scope
+  import.
+
+  The linter's `constant_outside_config` warning names exactly these two and is expected. Do not
+  "fix" it by moving them.
 
 ## Documentation discipline (load-bearing)
 

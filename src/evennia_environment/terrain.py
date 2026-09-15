@@ -17,7 +17,7 @@ from typing import Optional
 from evennia_environment.config import SLOT_NUMBERS
 from evennia_environment.effects import one_effect_per_type
 from evennia_environment.refusal import refuse
-from evennia_environment.weather import WeatherSlot
+from evennia_environment.weather import WeatherSlot, WeatherType
 
 
 @dataclass(frozen=True)
@@ -116,3 +116,47 @@ class TerrainType:
             ordered.append(slot)
 
         return tuple(ordered)
+
+
+# Declared here rather than in config.py, where library-standards.md puts
+# module-level constants. An exemption for these two only — anything else new
+# goes in config.py.
+#
+# They cannot move: both are built by *calling* TerrainType(...) and
+# WeatherType(...), so config.py would need those imported at module scope, and
+# this module already imports SLOT_NUMBERS from config.py — that closes a
+# cycle. config.py works around the same cycle in _check_terrain_types by
+# importing TerrainType inside the function, which a check can do and a
+# constant cannot.
+#
+# The library-standards linter's `constant_outside_config` warning names these
+# two and is expected. Do not "fix" it by moving them.
+
+#: The weather a room with no terrain has: nothing, said as a weather so the
+#: slot table below can be filled. It declares no effects and no text, so it
+#: contributes nothing and renders as nothing.
+_NO_WEATHER = WeatherType(key="no_weather")
+
+#: What ``EnvironmentRoomMixin.terrain_type`` answers when a room has no
+#: terrain of its own — because none was assigned, or because the member it
+#: carries has no ``TerrainType`` declared for it yet.
+#:
+#: A null object, not content. It declares no effects, so every key falls
+#: through to its own default — the same answer an absent terrain gave, with
+#: nothing downstream having to ask whether a terrain is there. The library
+#: naming a terrain would breach its own rules; naming *nothing* does not.
+#:
+#: Its key names what it is rather than being empty — a declaration refuses an
+#: empty key, and nothing here should be built past its own validation. The key
+#: collides with nothing because the null is never looked up by one: it is what
+#: a lookup answers when it *misses*, so a consumer declaring the same string
+#: gets their own terrain and never this.
+#:
+#: It never reaches the database. ``room.terrain`` still answers ``None`` for
+#: an unassigned room, so a builder asking which rooms still need one keeps
+#: its signal.
+NO_TERRAIN = TerrainType(
+    key="no_terrain",
+    effects=(),
+    weather_slots={number: WeatherSlot(_NO_WEATHER) for number in SLOT_NUMBERS},
+)

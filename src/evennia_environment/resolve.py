@@ -1,36 +1,55 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""What a key answers, given a terrain and a weather.
+"""What a key answers in a place, given the room's terrain.
 
-Pure Python: the contributors arrive as arguments rather than being found, so
-answering needs no room, no database and no Evennia. The room accessor is a
-thin wrapper that finds both and delegates, and a consumer with a room-like
-thing that is not a room can call this directly.
+Given an effect key and a terrain, this works out which contributions apply —
+the terrain's, and those of the weather in force there — and folds them in
+order into one value the caller acts on.
 
-Refusing reaches the log shim, so that path does need Evennia. Called from a
-bare script the refusal still raises; the line lands in ``pre-startup.log``.
+**A terrain is always given.** A room with none of its own resolves against
+``NO_TERRAIN``, which declares nothing, so absence is answered before this is
+reached and nothing here asks whether a terrain is there.
+
+**The hour is read here, once.** Two things depend on it — which of a slot's
+two weathers is in force, and which half of each contribution runs — and
+neither re-checks it. That is what reading the calendar costs: this is no
+longer callable with nothing running. ``_fold`` underneath takes everything it
+needs as arguments and stays a plain function.
 
 See docs/test-plan.md § RS and § RL.
 """
 
 from evennia_environment.refusal import refuse
+from evennia_environment.terrain import TerrainType
+from evennia_environment.weather import current_weather, is_night
 
 
-def resolve(effect_type, terrain_type=None, weather_type=None, **kwargs):
-    """Return what ``effect_type`` answers here.
+def resolve(effect_type, terrain_type, **kwargs):
+    """Return what ``effect_type`` answers in ``terrain_type``.
 
     Args:
         effect_type (EnvironmentEffectType): the key being asked about.
-        terrain_type (TerrainType): the room's terrain, or None.
-        weather_type (WeatherType): the weather in force, or None.
+        terrain_type (TerrainType): the room's terrain. ``NO_TERRAIN`` for a
+            room with none of its own — never ``None``.
         **kwargs: whatever the call site passes, handed to every helper.
 
     Returns:
         The value, of the effect type's declared return type.
 
     Raises:
-        ValueError: if a required kwarg is missing, or a helper hands back
-            something other than the declared return type.
+        ValueError: if the terrain is not a ``TerrainType``, a required kwarg
+            is missing, or a helper hands back something other than the
+            declared return type.
     """
+    # First: everything below reads the terrain, and a wrong one would
+    # otherwise walk nothing, find nothing and quietly answer the default.
+    if not isinstance(terrain_type, TerrainType):
+        refuse(
+            f"{effect_type.key!r} was asked for with {terrain_type!r} as its "
+            f"terrain, which is a {type(terrain_type).__name__} rather than a "
+            f"TerrainType. A room with no terrain of its own resolves against "
+            f"NO_TERRAIN."
+        )
+
     missing = [name for name in effect_type.requires if name not in kwargs]
     if missing:
         refuse(
@@ -40,6 +59,21 @@ def resolve(effect_type, terrain_type=None, weather_type=None, **kwargs):
             f"site has to pass them."
         )
 
+    # Once, at the top, and this answer is what the rest of the call uses.
+    night = is_night()
+
+    return _fold(
+        effect_type, terrain_type, current_weather(terrain_type, night), night, **kwargs
+    )
+
+
+def _fold(effect_type, terrain_type, weather_type, night, /, **kwargs):
+    """Run the default and then the contributors, checking each answer.
+
+    Split from ``resolve`` so the mechanics take everything they need as
+    arguments and read no clock — which is what keeps this half callable with
+    nothing running.
+    """
     # The default is the starting value, not a fallback consulted at the end:
     # a contribution that modifies what came before needs something to modify,
     # and a contribution that replaces it simply ignores what it was handed.
@@ -59,7 +93,7 @@ def resolve(effect_type, terrain_type=None, weather_type=None, **kwargs):
             continue
 
         value = _checked(
-            effect.helper(value, **kwargs),
+            effect.helper_for(night)(value, **kwargs),
             effect_type,
             f"the {described} {contributor.key!r}",
         )

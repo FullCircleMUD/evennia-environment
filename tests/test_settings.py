@@ -54,6 +54,12 @@ ENVIRONMENT_TERRAIN_ENUM = "tests.terrain_enums.Terrain"
 ENVIRONMENT_TERRAIN_TYPES = "tests.terrain_tables.TERRAINS"
 ENVIRONMENT_NIGHT_WATCHES = (6, 1)
 
+# Evennia's own setting, checked by this library: rooms are built as this
+# class unless something says otherwise, so it has to carry the mixin. Pointed
+# at a stub, because the check resolves it during django.setup() — see
+# tests/typeclass_stubs.py. CF-25 and CF-26 override it.
+BASE_ROOM_TYPECLASS = "tests.typeclass_stubs.RoomStub"
+
 # Required Django bits
 SECRET_KEY = "test-only-secret"
 TEST_ENVIRONMENT = True

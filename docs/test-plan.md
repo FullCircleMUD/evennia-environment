@@ -57,7 +57,7 @@ kwargs a call site has to supply.
 **It validates itself in `__post_init__`, and it raises there rather than collecting.** A malformed
 `EnvironmentEffectType(...)` is the consumer's own code failing at their own line, and a traceback
 pointing at that line is worth more than a tidy list pointing at us. Boot-time collection applies to
-the registry and the terrain tables, not to this.
+the settings, not to this.
 
 **`return_type` describes what comes back from a helper, not what is declared here.** So it is checked
 against an answer at the call, and all that can be checked at the declaration is that it is a usable
@@ -137,10 +137,9 @@ links. A contributor that does not vary declares what it declared before, so `ni
 existing declaration nothing.
 
 **Which half is in force is decided elsewhere.** `helper_for(night)` is handed the answer and
-returns one; nothing here reads a clock. Its parameter is named for the clock, not for darkness —
-the same split the night watches make in § CF. `[TBD — needs discussion: where `night` reaches
-`resolve()` from. `resolve()` is pure today and the room mixin already works it out for weather.
-Settled in the integration pass, not here.]`
+returns one; nothing here reads a clock. `resolve()` is what reads it — once per call, for the slot
+and both contributions together. Its parameter is named for the clock, not for darkness, the same
+split the night watches make in § CF.
 
 **The helper is checked the same way the type's default is** — callable, takes the running value
 positionally, takes `**kwargs`. Both go through one check, so a helper that would crash at the first
@@ -438,6 +437,25 @@ decides when it is shown.
 | TT-12 | The description defaults to `None` when the consumer declares none | `test_tt_12_description_defaults_to_none` |
 | TT-13 | A description that is not a string is refused | `test_tt_13_refuses_a_description_that_is_not_a_string` |
 
+### The null terrain
+
+One `TerrainType` the library declares itself, handed back by `terrain_type` whenever a room has no
+terrain of its own. It declares no effects and ten slots of an empty weather, so resolving against it
+runs the default and stops — the same answer an absent terrain gave, without anything having to ask
+whether a terrain is there.
+
+**It is a null object, not content.** No effect key, no effect, no game concept. The library naming a
+terrain would breach its own rules; naming *nothing* does not. Its key names what it is — it is never
+looked up by one, being what a lookup answers when it misses, so a consumer declaring the same string
+gets their own terrain and never this.
+
+**It never reaches the database.** `room.terrain` still answers `None` for an unassigned room, so a
+builder audit keeps the signal. Only `terrain_type` substitutes.
+
+| ID | Case | Test function |
+|---|---|---|
+| TT-14 | The null terrain declares no effects and ten slots, so resolving against it returns the effect type's default and asking it for a weather answers rather than raising | `test_tt_14_declares_nothing_and_still_names_a_weather` |
+
 ### The refusal
 
 | ID | Case | Test function |
@@ -532,23 +550,36 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | TP-15 | The refusal names the room, so a build applying content to hundreds of them says which one failed. `"terrain cannot be 'swmap'"` with no room is the bad value and no way to find it | `test_tp_15_the_refusal_names_the_room` |
 | TP-16 | An unknown terrain name refuses without the enum's own `ValueError` chained underneath — the consumer's mistake is the name, not the lookup that went looking for it | `test_tp_16_an_unknown_name_does_not_chain_the_enums_own_error` |
 
-## RS — `resolve(effect_type, terrain_type, weather_type, night, **kwargs)`
+## RS — `resolve(effect_type, terrain_type, **kwargs)`
 
-What a key answers. Given an effect type and whichever contributors apply, it runs them in order and
-returns the value.
+What a key answers in a place. Given an effect key and a room's terrain, it works out which
+contributions apply — the terrain's, and those of the weather in force there — and folds them in
+order into one value the caller acts on.
 
-**Pure Python.** It takes the terrain and the weather as arguments rather than finding them, so it
-needs no room, no database and no Evennia. The room accessor becomes a thin wrapper that finds both
-and delegates. A consumer with a room-like thing that is not a room can call it directly.
+**A terrain is always given.** `terrain_type` is required and is never `None`: a room with none of
+its own resolves against the null terrain, which declares nothing, so the absence is answered before
+this is reached. Nothing here asks whether a terrain is there.
 
-**Both contributors are optional.** A room with no terrain, or one whose weather is not known yet,
-still gets an answer — the default's.
+**It owns the hour.** `resolve()` calls `is_night()` once, at the top, and that answer is what every
+part of the call uses. Two things depend on the hour — which of a slot's two weathers is in force,
+and which half of each contribution runs — and neither re-checks it. One call, one hour, however many
+contributions run.
+
+**It finds the weather.** A terrain carries its own ten slots, so the caller passes a terrain and
+nothing else.
 
 ```
+night = is_night()
+weather = current_weather(terrain_type, night)
+
 value = effect_type.default(None, **kwargs)
-if terrain declares this key:  value = terrain_helper(value, **kwargs)
-if weather declares this key:  value = weather_helper(value, **kwargs)
+if terrain declares this key:  value = terrain_effect.helper_for(night)(value, **kwargs)
+if weather declares this key:  value = weather_effect.helper_for(night)(value, **kwargs)
 ```
+
+**Reading the hour needs the calendar**, so `resolve()` is no longer callable with nothing running.
+The fold underneath takes everything it needs as arguments and stays a plain function; tests patch
+`is_night` and `current_weather_band` to drive it.
 
 **The return type is checked after every step, not once at the end**, so a refusal says which
 contributor got it wrong rather than leaving three candidates. The default is checked too — a broken
@@ -565,11 +596,21 @@ is at fault: the call site for a missing kwarg, the contributor for a bad return
 
 | ID | Case | Test function |
 |---|---|---|
-| RS-01 | With neither contributor, the default's answer comes back | `test_rs_01_with_neither_contributor_the_default_answers` |
-| RS-02 | With only a terrain, its helper is handed the default's answer and its result is returned | `test_rs_02_a_terrain_is_handed_the_defaults_answer` |
-| RS-03 | With only a weather, its helper is handed the default's answer | `test_rs_03_a_weather_is_handed_the_defaults_answer` |
-| RS-04 | With both, terrain runs and then weather, each handed the running value. Proved with order-sensitive helpers, so a run in either order gives a different number | `test_rs_04_terrain_runs_then_weather` |
+| RS-01 | The null terrain contributes nothing and its weather declares nothing, so the default's answer comes back — what a room with no terrain of its own gets | `test_rs_01_with_neither_contributor_the_default_answers` |
+| RS-02 | A terrain's helper is handed the default's answer and its result is returned | `test_rs_02_a_terrain_is_handed_the_defaults_answer` |
+| RS-03 | A weather's helper is handed the default's answer | `test_rs_03_a_weather_is_handed_the_defaults_answer` |
+| RS-04 | Terrain runs and then weather, each handed the running value. Proved with order-sensitive helpers, so a run in either order gives a different number | `test_rs_04_terrain_runs_then_weather` |
 | RS-05 | A contributor that declares other keys but not this one changes nothing | `test_rs_05_a_contributor_declaring_other_keys_changes_nothing` |
+| RS-16 | A terrain that is not a `TerrainType` is refused, naming what was passed. The caller cannot omit it, so the mistake it can still make is passing the wrong thing | `test_rs_16_refuses_a_terrain_that_is_not_a_terrain_type` |
+
+### The hour
+
+| ID | Case | Test function |
+|---|---|---|
+| RS-12 | The weather is the one the terrain's slots name — the band picks the slot, the hour picks that slot's day or night weather | `test_rs_12_the_weather_is_the_one_the_slots_name` |
+| RS-14 | At night each contribution's night helper runs and by day its day helper, for terrain and weather in one call | `test_rs_14_the_hour_picks_each_contributions_half` |
+| RS-15 | `is_night()` is called once at the top of `resolve()` and that answer is used for everything the hour decides — collapsing the slot to a weather, and picking each contribution's half. It is not re-checked per effect or per contributor. Asserted on the call count | `test_rs_15_the_hour_is_read_once_for_the_whole_call` |
+| RS-17 | The weather is worked out once at the top of `resolve()` and reused, rather than being derived again when its contribution runs. Asserted on the call count | `test_rs_17_the_weather_is_worked_out_once_for_the_whole_call` |
 
 ### What the caller passes
 
@@ -614,9 +655,9 @@ as the log does.
 `log_file()` on a deferred rather than synchronously, which is the opposite of the window the `CF`
 cases run in. The cases read the file back the same way regardless.
 
-**`resolve()` documents itself as needing no room, no database and no Evennia.** That holds for the
-answering path and no longer holds for the refusing one, which now reaches the log shim. A consumer
-calling it from a bare script still gets the refusal; the line goes to `pre-startup.log`.
+**`resolve()` needs the calendar**, so these fire with something running. `_fold()` underneath takes
+everything it needs as arguments and reads no clock, but a refusal from either half reaches the log
+shim. Called from a bare script the refusal still raises; the line goes to `pre-startup.log`.
 
 ### The room's refusals
 
@@ -754,6 +795,26 @@ correct reading; not declaring at all is not.
 | CF-16 | A setting that is not a collection of watch numbers is refused | `test_cf_16_refuses_night_watches_that_are_not_watch_numbers` |
 | CF-17 | A watch number outside 1 to 6 is refused, naming it — the calendar has six | `test_cf_17_refuses_a_watch_outside_one_to_six` |
 | CF-18 | An empty tuple is accepted: a game with no night | `test_cf_18_accepts_no_night_watches_at_all` |
+
+### The room typeclass
+
+Evennia's `BASE_ROOM_TYPECLASS` names the class rooms are built as when nothing says otherwise. The
+library checks that it carries `EnvironmentRoomMixin`, because without it every room answers every
+key with its default and nothing says why.
+
+**It is Evennia's setting, not this library's.** It always has a value, so there is no absent case —
+only a class that cannot be imported, and one that does not carry the mixin.
+
+**What it proves is bounded.** A room of that class *can* hold a terrain; it does not follow that any
+room *has* one, since the property defaults to `None`. Nor does it cover rooms built as some other
+class by a prototype or a world file. The refusal says the default room typeclass lacks the mixin,
+and claims nothing further.
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-24 | A base room typeclass carrying the mixin is accepted | `test_cf_24_accepts_a_base_room_carrying_the_mixin` |
+| CF-25 | One that does not carry it is refused, naming the class and the mixin | `test_cf_25_refuses_a_base_room_without_the_mixin` |
+| CF-26 | One that cannot be imported is refused, and the underlying error is chained rather than swallowed | `test_cf_26_refuses_a_base_room_that_cannot_be_imported` |
 
 ### The terrain types
 
@@ -944,7 +1005,21 @@ terrain answer with the effect type's default rather than raising.
 | RM-05 | `get_weather_description` returns the active weather's description, working out the watch itself | `test_rm_05_returns_the_active_weathers_description` |
 | RM-06 | `get_weather_description(day=False)` forces the night weather, overriding the watch | `test_rm_06_day_false_forces_the_night_weather` |
 | RM-07 | A weather declaring no description returns `None` rather than raising | `test_rm_07_a_weather_with_no_description_returns_none` |
-| RM-09 | `get_weather_description` on a room with no terrain returns `None` — there is no slot table to read a band against | `test_rm_09_a_room_with_no_terrain_has_no_weather` |
+| RM-09 | `get_weather_description` on a room with no terrain returns `None` — the null terrain's slots hold a weather that declares no description, so the answer is the same one an absent terrain gave | `test_rm_09_a_room_with_no_terrain_has_no_weather` |
+| RM-13 | `current_weather` on a room with no terrain is the null terrain's weather, not `None` — the property never answers absence, as `terrain_type` does not | `test_rm_13_no_terrain_has_the_null_terrains_weather` |
+
+### The terrain a room resolves against
+
+`terrain_type` is the read path, and it never answers `None`. RM-02, RM-04 and RM-09 above describe
+what a room with no terrain answers, and they are unchanged by this — a null terrain declaring
+nothing gives the same answers an absent one did. What changes is that nothing downstream tests for
+absence.
+
+| ID | Case | Test function |
+|---|---|---|
+| RM-10 | `terrain_type` on a room with no terrain is the null terrain, not `None` | `test_rm_10_no_terrain_resolves_against_the_null_terrain` |
+| RM-11 | `terrain_type` on a room whose terrain names no declared `TerrainType` is the null terrain — an enum member without one is a game still being written, which CF accepts | `test_rm_11_a_terrain_with_no_type_resolves_against_the_null` |
+| RM-12 | `room.terrain` is still `None` on a room with no terrain, so the null does not reach what is stored or what a builder reads | `test_rm_12_the_null_never_reaches_what_is_stored` |
 
 ## The design
 
@@ -956,10 +1031,10 @@ What has to be decided before the surface it belongs to can be built. Each is a 
 the design conversation and left open, not a gap to be filled by whoever reads this next.
 
 **Terrain**
-- `[TBD — needs discussion: whether every `Terrain` member must appear in the terrain table. Absent
-  could mean "every effect at its default" or could mean the author forgot.]`
-- `[TBD — needs discussion: whether a room with no terrain at all is legal and neutral, or a mistake
-  worth refusing. Same question as the one above, from the room's side.]`
+- `[TBD — needs discussion: whether every `Terrain` member must appear in the terrain table. A member
+  with none resolves against the null terrain, so the behaviour is settled — every key at its
+  default. What is open is whether that should be *accepted*, or refused at boot as an author's
+  oversight.]`
 - `[TBD — needs discussion: the accessor. Whether the keyed form is the whole API, or whether an
   all-effects form exists alongside it for a builder or debug command, and what both are called.]`
 
@@ -977,8 +1052,6 @@ the design conversation and left open, not a gap to be filled by whoever reads t
   designed. Note that weather keyed on `day_of_year` turns over at midnight, in the middle of the
   night watches — a weather-day offset from the calendar day is what puts the roll at dawn, and it
   also decides whether a slot's night weather is the night after its day or the one before.]`
-- `[TBD — needs discussion: how the dark-watches declaration is shaped and where it sits — a setting,
-  or part of the consumer's declaration module alongside the terrains and effect keys.]`
 - `[TBD — needs discussion: whether mountains are their own region or a terrain-driven index shift
   on a neighbouring one. The ten-slot structure has no region layer in it, so this may already be
   answered by terrain keying the slots — but that has not been said.]`
@@ -997,7 +1070,7 @@ in it is agreed. Treat a shape lifted from it as an invention until it has been 
 Not reused. An ID names one behaviour for the life of the plan, so a commit or a docstring
 referring to one always means the same thing.
 
-`EF-06 — EF-11`, `ER-01 — ER-11`, `EE-04 — EE-06`, `EE-07`, `TT-08`, `TP-02`, `TP-06`
+`EF-06 — EF-11`, `ER-01 — ER-11`, `EE-04 — EE-06`, `EE-07`, `TT-08`, `TT-15`, `TP-02`, `TP-06`, `RS-13`
 
 **The whole `ER` block, and the registry with it.** `EnvironmentEffectTypeRegistry` and
 `ENVIRONMENT_EFFECT_TYPES` were read by nothing but their own cases. Every path in the library takes

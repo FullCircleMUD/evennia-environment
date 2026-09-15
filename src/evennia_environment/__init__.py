@@ -4,14 +4,15 @@
 Tagline: *What a room's surroundings do to whoever is standing in it.*
 
 The library holds two contributors to one answer. **Terrain** is permanent and
-belongs to the room. **Weather** varies with the calendar and belongs to the
-region. Both speak the same vocabulary: effect keys the consumer declares, and
-values a call site asks for by name.
+belongs to the room. **Weather** comes from the terrain's ten slots, varying
+with the calendar's day and season. Both speak the same vocabulary: effect keys
+the consumer declares, and values a call site asks for by name. Either
+contribution may differ by day and night.
 
 What a consumer imports from here: the declarations — ``EnvironmentEffectType``,
 ``EnvironmentEffect``, ``WeatherType``, ``WeatherSlot``, ``TerrainType`` — the
-registry they declare effect types to, the stock helpers, and ``resolve()``.
-``__all__`` below is the list.
+stock helpers, ``NO_TERRAIN``, and ``resolve()``. ``__all__`` below is the
+list.
 
 ``EnvironmentRoomMixin`` is **not** here. It imports Evennia, and this module is
 imported while Django is still building its app registry, so a consumer takes it
@@ -36,7 +37,7 @@ from evennia_environment.helpers import (
     RoundUp,
 )
 from evennia_environment.resolve import resolve
-from evennia_environment.terrain import TerrainType
+from evennia_environment.terrain import NO_TERRAIN, TerrainType
 from evennia_environment.weather import (
     WeatherSlot,
     WeatherType,
@@ -55,6 +56,7 @@ __all__ = [
     "EnvironmentEffect",
     "EnvironmentEffectType",
     "Multiply",
+    "NO_TERRAIN",
     "RoundDown",
     "RoundUp",
     "TerrainType",

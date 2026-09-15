@@ -33,6 +33,9 @@ and gives each one the values it overrides. Then any call site asks the room for
 about — `look` asks about visibility, movement asks about cost, the survival tick asks about health.
 Weather contributes to the same keys, varying with the season and the day.
 
+Any contribution can differ by day and night — a cavern is dark at noon, a pass costs more to cross
+after dark, a desert freezes once the sun is down.
+
 The library never invents a key and never applies one. It knows that keys exist, what they default to,
 and how two contributors combine. What a value *means* is the game's business.
 

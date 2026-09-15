@@ -11,7 +11,7 @@ A consumer declares four things. The library holds them, and answers questions a
 | A terrain `Enum` | Validates what a room is assigned |
 | `EnvironmentEffectType`s — the questions their game asks | Checks every answer against the declared return type |
 | `WeatherType`s, each declaring what it changes | Runs its contribution when it is in force |
-| `TerrainType`s, each with ten weather slots | Picks the slot the day's band names |
+| `TerrainType`s, each with ten weather slots | Picks the slot the day's band names, and the hour picks that slot's weather |
 
 Nothing else. The library names no effect, no terrain and no weather, and decides nothing about what
 a value means.
@@ -28,8 +28,8 @@ and no way to catch a typo.
 ## A contribution is a helper, not a value
 
 An effect holds a callable — `f(value, **kwargs) -> value`. A declared number cannot express most of
-what a game wants: natural light is terrain and the hour together, a stealth bonus depends on who is
-asking. So the consumer writes a function, and the library routes rather than computes.
+what a game wants: a stealth bonus depends on who is asking, an encumbrance penalty on what they are
+carrying. So the consumer writes a function, and the library routes rather than computes.
 
 The static case is a stock helper, so there is one shape and one code path:
 
@@ -40,6 +40,41 @@ EnvironmentEffect(MOVE_COST, Chain(Multiply(1.5), RoundUp()))
 
 Whether a contribution replaces the running value or modifies it is its own choice — `Constant`
 ignores what it was handed, anything else uses it. The library has no merge rule and needs none.
+
+## Day and night are structural, not something a helper works out
+
+An effect declares two helpers, and `resolve()` picks. Underground is dark at noon; a mountain pass
+costs more to cross after dark; a desert freezes at night.
+
+```python
+EnvironmentEffect(NATURAL_LIGHT, Constant(True), night=Constant(False))
+EnvironmentEffect(MOVE_COST, Constant(2.0), night=Constant(3.0))
+```
+
+A helper could read the clock itself, and that was the first shape considered. It hides the
+dependency: nothing in the declaration says the value varies, so nothing can inspect it, a consumer
+writing the same closure on every terrain repeats it, and a value that came from data could not
+express it at all. Weather had structure for this from the start — a `WeatherSlot` holds a day
+weather and a night one — and an effect having it too is the same answer applied to the other
+contributor.
+
+`night` is optional and filled from the day helper when it is not given, so a contribution that does
+not vary declares exactly what it declared before. Both halves are always populated, which is what
+keeps absence out of everything downstream, and "does this vary" is `night is helper`.
+
+**The pair sits inside the effect, not around the collection.** One key is still one effect, so the
+rule below holds and the chain stays two links. Two sets of effects per contributor would have needed
+a rule for a key declared in one and not the other.
+
+## Nothing is dark because it is night
+
+`is_night()` reads the clock. It answers the same everywhere in the game, and the setting behind it —
+`ENVIRONMENT_NIGHT_WATCHES` — is a list of watch numbers.
+
+Whether a *place* is dark is a different question: a cavern is dark at noon, a blizzard darkens a
+valley at dusk. That one is terrain and weather together, and a consumer asks it as an effect key
+they declared. Naming the clock for darkness put both under one word, and a consumer reaching for the
+watches to light a room would have got the wrong answer for every cave.
 
 ## Pull, not push
 
@@ -65,14 +100,26 @@ steps they write inside one function, in the order they wrote the lines.
 ## Resolution
 
 ```python
+night = is_night()
+weather = current_weather(terrain_type, night)
+
 value = effect_type.default(None, **kwargs)
-if terrain declares this key:  value = terrain_helper(value, **kwargs)
-if weather declares this key:  value = weather_helper(value, **kwargs)
+if terrain declares this key:  value = terrain_effect.helper_for(night)(value, **kwargs)
+if weather declares this key:  value = weather_effect.helper_for(night)(value, **kwargs)
 ```
 
-`resolve()` takes the contributors as arguments rather than finding them, so answering needs no room,
-no database and no Evennia. The room mixin is a thin wrapper that finds both and delegates. Refusing
-reaches the log, so that path does need Evennia.
+`resolve()` is given a terrain and finds the rest. The hour is read once at the top and used for
+everything that depends on it — which of a slot's two weathers is in force, and which half of each
+contribution runs. The weather is worked out once and reused.
+
+**One question, one place.** The alternative was the room accessor working out the hour, collapsing
+the slot itself and passing a weather down. That put the same decision in two places: terrain's half
+picked inside `resolve()`, weather's picked outside it. Reading the calendar here is what that costs
+— `resolve()` is not callable with nothing running. `_fold()` underneath takes everything it needs as
+arguments and stays a plain function.
+
+**A terrain is always given.** A room with none of its own resolves against `NO_TERRAIN`, so absence
+is answered before `resolve()` is reached and nothing on the path asks whether a terrain is there.
 
 The return type is checked after every step rather than once at the end, so a refusal names which
 helper got it wrong instead of leaving three candidates.
@@ -101,9 +148,9 @@ disagree, and the identity for small ints, so `hash(day) % 6` is a metronome.
 
 ## Held between signals, not polled
 
-The band and whether it is night are both held in module state. `day_changed` and `phase_changed`
-refresh them, and a read computes only when nothing is held — which is what answers between a restart
-and the next rollover.
+The band and whether it is night are both held in module state. `day_changed` refreshes the band and
+`phase_changed` refreshes the hour, and a read computes only when nothing is held — which is what
+answers between a restart and the next rollover.
 
 Measuring decided this: `game_date()` costs about 3,600 ns against the hash's 514, so the saving is
 in not asking the calendar on a read rather than in caching the hash.
@@ -119,6 +166,19 @@ The member goes in and comes back — `at_set` takes `Terrain.SWAMP` or `"swamp"
 search on. A `TerrainType` could not be stored anyway: it holds callables, and pickle refuses them.
 
 Write-once, because a room is given its terrain when it is built and does not change it in play.
+
+## A room with no terrain resolves against a null one
+
+`terrain_type` never answers `None`. A room with nothing assigned, and a room carrying a member no
+`TerrainType` was declared for, both get `NO_TERRAIN` — an empty terrain the library declares, with
+no effects and ten slots of an empty weather.
+
+Every key then falls through to its own default, which is the answer an absent terrain gave anyway.
+What it buys is that nothing downstream tests for absence: `resolve()`, both weather accessors and
+the description accessor each lost a branch.
+
+It is a null object rather than content — no effect key, no effect, no game concept. `room.terrain`
+still answers `None`, so a builder asking which rooms still need one keeps the signal.
 
 ## Everything that raises, logs
 

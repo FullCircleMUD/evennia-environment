@@ -9,6 +9,8 @@ import ast
 import dataclasses
 import inspect
 import os
+from contextlib import contextmanager
+from importlib import import_module
 from unittest import TestCase, mock
 
 # The TP cases create real objects, so they need a database around them. The
@@ -38,6 +40,7 @@ from evennia_environment import (
     EnvironmentEffect,
     EnvironmentEffectType,
     Multiply,
+    NO_TERRAIN,
     RoundDown,
     RoundUp,
     TerrainType,
@@ -567,6 +570,32 @@ class CurrentWeatherTests(TestCase):
                     current_weather(MOUNTAINS, night=True).key,
                     current_weather(MOUNTAINS, night=False).key,
                 )
+
+
+class NullTerrainTests(TestCase):
+    """TT-14. The terrain the library declares for a room with none."""
+
+    def test_tt_14_declares_nothing_and_still_names_a_weather(self):
+        """TT-14"""
+        effect_type = EnvironmentEffectType(
+            key="move_cost", return_type=float, default=_constant(1.0)
+        )
+
+        # Declaring nothing is what makes it a null object rather than
+        # content: every key falls through to its own default, which is the
+        # answer an absent terrain gave.
+        self.assertEqual(NO_TERRAIN.effects, ())
+        self.assertEqual(
+            resolve(effect_type, NO_TERRAIN), 1.0
+        )
+
+        # Ten slots, so asking it for a weather answers rather than raising —
+        # which is what lets the weather accessors drop their absence checks.
+        self.assertEqual(len(NO_TERRAIN.weather_slots), 10)
+        with mock.patch.object(weather, "current_weather_band", return_value=4):
+            self.assertIsInstance(
+                current_weather(NO_TERRAIN, night=False), WeatherType
+            )
 
 
 MOVEMENT_COST = EnvironmentEffectType(
@@ -1101,8 +1130,41 @@ def _ten_still_slots():
     return {n: still for n in range(1, 11)}
 
 
-class ResolveTests(TestCase):
-    """RS-01 — RS-05. What a key answers, given who declares it."""
+def _ten_slots_of(weather):
+    """Ten slots of ``weather``, so the band cannot change which one is in force."""
+    slot = WeatherSlot(weather)
+    return {n: slot for n in range(1, 11)}
+
+
+def _resolve_module():
+    """Return the ``resolve`` module, not the function of the same name.
+
+    ``__init__`` re-exports ``resolve()``, which shadows the submodule in the
+    package namespace — so ``from evennia_environment import resolve`` hands
+    back the function and a patch against it finds no attributes.
+    """
+    return import_module("evennia_environment.resolve")
+
+
+class ResolveDriven:
+    """Drive ``resolve()`` without a clock.
+
+    ``resolve()`` reads the hour itself, so every RS case has to say what the
+    hour is. Patched where it is looked up rather than where it is defined —
+    ``resolve`` holds its own reference to the name.
+    """
+
+    @contextmanager
+    def _at(self, night=False):
+        """Run the block with ``is_night()`` answering ``night``."""
+        with mock.patch.object(
+            _resolve_module(), "is_night", return_value=night
+        ) as reading:
+            yield reading
+
+
+class ResolveTests(ResolveDriven, TestCase):
+    """RS-01 — RS-05, RS-16. What a key answers, given who declares it."""
 
     def _type(self, default=None, requires=()):
         return EnvironmentEffectType(
@@ -1112,21 +1174,28 @@ class ResolveTests(TestCase):
             requires=requires,
         )
 
-    def _terrain(self, *effects):
-        return TerrainType(
-            key="swamp", effects=effects, weather_slots=_ten_still_slots()
+    def _terrain(self, *effects, weather=None):
+        """A terrain declaring ``effects``, whose every slot holds ``weather``."""
+        slots = (
+            _ten_still_slots() if weather is None else _ten_slots_of(weather)
         )
+        return TerrainType(key="swamp", effects=effects, weather_slots=slots)
 
     def test_rs_01_with_neither_contributor_the_default_answers(self):
         """RS-01"""
-        self.assertEqual(resolve(self._type()), 1.0)
+        # What a room with no terrain of its own resolves against. The null
+        # declares nothing and its weather declares nothing, so nothing runs
+        # but the default.
+        with self._at():
+            self.assertEqual(resolve(self._type(), NO_TERRAIN), 1.0)
 
     def test_rs_02_a_terrain_is_handed_the_defaults_answer(self):
         """RS-02"""
         effect_type = self._type()
         terrain = self._terrain(EnvironmentEffect(effect_type, Add(1.0)))
 
-        self.assertEqual(resolve(effect_type, terrain_type=terrain), 2.0)
+        with self._at():
+            self.assertEqual(resolve(effect_type, terrain), 2.0)
 
     def test_rs_03_a_weather_is_handed_the_defaults_answer(self):
         """RS-03"""
@@ -1134,22 +1203,27 @@ class ResolveTests(TestCase):
         weather = WeatherType(
             key="blizzard", effects=(EnvironmentEffect(effect_type, Add(1.0)),)
         )
+        # The weather reaches resolve through the terrain's slots, which is the
+        # only way in now.
+        terrain = self._terrain(weather=weather)
 
-        self.assertEqual(resolve(effect_type, weather_type=weather), 2.0)
+        with self._at():
+            self.assertEqual(resolve(effect_type, terrain), 2.0)
 
     def test_rs_04_terrain_runs_then_weather(self):
         """RS-04"""
         effect_type = self._type()
-        terrain = self._terrain(EnvironmentEffect(effect_type, Add(1.0)))
         weather = WeatherType(
             key="blizzard", effects=(EnvironmentEffect(effect_type, Multiply(3.0)),)
+        )
+        terrain = self._terrain(
+            EnvironmentEffect(effect_type, Add(1.0)), weather=weather
         )
 
         # 1.0 -> +1 -> 2.0 -> x3 -> 6.0. The other order would give 4.0, so the
         # number proves the sequence rather than only the arithmetic.
-        self.assertEqual(
-            resolve(effect_type, terrain_type=terrain, weather_type=weather), 6.0
-        )
+        with self._at():
+            self.assertEqual(resolve(effect_type, terrain), 6.0)
 
     def test_rs_05_a_contributor_declaring_other_keys_changes_nothing(self):
         """RS-05"""
@@ -1157,18 +1231,152 @@ class ResolveTests(TestCase):
         other = EnvironmentEffectType(
             key="visibility", return_type=float, default=_constant(1.0)
         )
-        terrain = self._terrain(EnvironmentEffect(other, Constant(0.2)))
         weather = WeatherType(
             key="fog", effects=(EnvironmentEffect(other, Constant(0.1)),)
         )
-
-        self.assertEqual(
-            resolve(effect_type, terrain_type=terrain, weather_type=weather), 1.0
+        terrain = self._terrain(
+            EnvironmentEffect(other, Constant(0.2)), weather=weather
         )
 
+        with self._at():
+            self.assertEqual(resolve(effect_type, terrain), 1.0)
 
-class ResolveKwargTests(TestCase):
+    def test_rs_16_refuses_a_terrain_that_is_not_a_terrain_type(self):
+        """RS-16"""
+        effect_type = self._type()
+
+        # The caller cannot omit it, so the mistake left is passing the wrong
+        # thing. Unrefused it would walk nothing, find nothing and quietly
+        # answer the default — a wrong answer with no sign of one.
+        for not_a_terrain in ("swamp", None, 42, WeatherType(key="blizzard")):
+            with self.subTest(terrain_type=not_a_terrain):
+                with self._at():
+                    with self.assertRaises(ValueError) as caught:
+                        resolve(effect_type, not_a_terrain)
+
+                self.assertIn(repr(not_a_terrain), str(caught.exception))
+
+
+class ResolveHourTests(ResolveDriven, TestCase):
+    """RS-12, RS-14, RS-15, RS-17. What the hour decides, and how often."""
+
+    def _type(self):
+        return EnvironmentEffectType(
+            key="movement_cost", return_type=float, default=_constant(1.0)
+        )
+
+    def test_rs_12_the_weather_is_the_one_the_slots_name(self):
+        """RS-12"""
+        from evennia_environment import weather as weather_module
+
+        effect_type = self._type()
+
+        # Three weathers, each adding a different amount, so the number says
+        # which one ran. Slot 4 carries two of them and every other slot the
+        # third.
+        day = WeatherType(
+            key="scorching", effects=(EnvironmentEffect(effect_type, Add(1.0)),)
+        )
+        night = WeatherType(
+            key="freezing", effects=(EnvironmentEffect(effect_type, Add(2.0)),)
+        )
+        elsewhere = WeatherType(
+            key="still", effects=(EnvironmentEffect(effect_type, Add(100.0)),)
+        )
+
+        slots = {n: WeatherSlot(elsewhere) for n in range(1, 11)}
+        slots[4] = WeatherSlot(day, night=night)
+        terrain = TerrainType(key="swamp", weather_slots=slots)
+
+        # The real derivation, not a stand-in for it: the band picks the slot,
+        # then the hour picks that slot's half. 101.0 would mean the band was
+        # ignored; the wrong one of 2.0 and 3.0 would mean the hour was.
+        with mock.patch.object(
+            weather_module, "current_weather_band", return_value=4
+        ):
+            with self._at(night=False):
+                self.assertEqual(resolve(effect_type, terrain), 2.0)
+
+            with self._at(night=True):
+                self.assertEqual(resolve(effect_type, terrain), 3.0)
+
+    def test_rs_14_the_hour_picks_each_contributions_half(self):
+        """RS-14"""
+        effect_type = self._type()
+        weather = WeatherType(
+            key="blizzard",
+            effects=(
+                EnvironmentEffect(effect_type, Multiply(3.0), night=Multiply(5.0)),
+            ),
+        )
+        terrain = TerrainType(
+            key="swamp",
+            effects=(
+                EnvironmentEffect(effect_type, Add(1.0), night=Add(9.0)),
+            ),
+            weather_slots=_ten_slots_of(weather),
+        )
+
+        # Day:   1.0 -> +1 -> 2.0  -> x3 -> 6.0
+        # Night: 1.0 -> +9 -> 10.0 -> x5 -> 50.0
+        # Both contributors move together, so neither is answered from a
+        # different hour than the other.
+        with self._at(night=False):
+            self.assertEqual(resolve(effect_type, terrain), 6.0)
+
+        with self._at(night=True):
+            self.assertEqual(resolve(effect_type, terrain), 50.0)
+
+    def test_rs_15_the_hour_is_read_once_for_the_whole_call(self):
+        """RS-15"""
+        effect_type = self._type()
+        weather = WeatherType(
+            key="blizzard",
+            effects=(EnvironmentEffect(effect_type, Multiply(3.0)),),
+        )
+        terrain = TerrainType(
+            key="swamp",
+            effects=(EnvironmentEffect(effect_type, Add(1.0)),),
+            weather_slots=_ten_slots_of(weather),
+        )
+
+        # Three things want the hour — the slot, and each contribution's half
+        # — and one call answers all of them.
+        with self._at() as reading:
+            resolve(effect_type, terrain)
+
+        self.assertEqual(reading.call_count, 1)
+
+    def test_rs_17_the_weather_is_worked_out_once_for_the_whole_call(self):
+        """RS-17"""
+        effect_type = self._type()
+        weather = WeatherType(
+            key="blizzard",
+            effects=(EnvironmentEffect(effect_type, Multiply(3.0)),),
+        )
+        terrain = TerrainType(
+            key="swamp",
+            effects=(EnvironmentEffect(effect_type, Add(1.0)),),
+            weather_slots=_ten_slots_of(weather),
+        )
+
+        with mock.patch.object(
+            _resolve_module(), "current_weather", return_value=weather
+        ) as finding:
+            with self._at():
+                self.assertEqual(resolve(effect_type, terrain), 6.0)
+
+        self.assertEqual(finding.call_count, 1)
+
+
+class ResolveKwargTests(ResolveDriven, TestCase):
     """RS-06 — RS-08. What the call site passes, and what is required."""
+
+    def _terrain(self, *effects, weather=None):
+        slots = (
+            _ten_still_slots() if weather is None else _ten_slots_of(weather)
+        )
+        return TerrainType(key="swamp", effects=effects, weather_slots=slots)
 
     def test_rs_06_the_kwargs_reach_every_helper(self):
         """RS-06"""
@@ -1183,21 +1391,15 @@ class ResolveKwargTests(TestCase):
         effect_type = EnvironmentEffectType(
             key="movement_cost", return_type=float, default=_watching
         )
-        terrain = TerrainType(
-            key="swamp",
-            effects=(EnvironmentEffect(effect_type, _watching),),
-            weather_slots=_ten_still_slots(),
-        )
         weather = WeatherType(
             key="blizzard", effects=(EnvironmentEffect(effect_type, _watching),)
         )
-
-        resolve(
-            effect_type,
-            terrain_type=terrain,
-            weather_type=weather,
-            actor="someone",
+        terrain = self._terrain(
+            EnvironmentEffect(effect_type, _watching), weather=weather
         )
+
+        with self._at():
+            resolve(effect_type, terrain, actor="someone")
 
         self.assertEqual(seen, [{"actor": "someone"}] * 3)
 
@@ -1210,8 +1412,9 @@ class ResolveKwargTests(TestCase):
             requires=("actor", "door"),
         )
 
-        with self.assertRaises(ValueError) as caught:
-            resolve(effect_type, actor="someone")
+        with self._at():
+            with self.assertRaises(ValueError) as caught:
+                resolve(effect_type, NO_TERRAIN, actor="someone")
 
         message = str(caught.exception)
         self.assertIn("movement_cost", message)
@@ -1226,12 +1429,14 @@ class ResolveKwargTests(TestCase):
             requires=("actor",),
         )
 
-        self.assertEqual(
-            resolve(effect_type, actor="someone", door="a door"), 1.0
-        )
+        with self._at():
+            self.assertEqual(
+                resolve(effect_type, NO_TERRAIN, actor="someone", door="a door"),
+                1.0,
+            )
 
 
-class ResolveReturnTypeTests(TestCase):
+class ResolveReturnTypeTests(ResolveDriven, TestCase):
     """RS-09 — RS-11. A wrong answer names whichever helper gave it."""
 
     def test_rs_09_refuses_a_default_returning_the_wrong_type(self):
@@ -1240,8 +1445,9 @@ class ResolveReturnTypeTests(TestCase):
             key="movement_cost", return_type=float, default=_constant("fast")
         )
 
-        with self.assertRaises(ValueError) as caught:
-            resolve(effect_type)
+        with self._at():
+            with self.assertRaises(ValueError) as caught:
+                resolve(effect_type, NO_TERRAIN)
 
         self.assertIn("default", str(caught.exception))
 
@@ -1256,8 +1462,9 @@ class ResolveReturnTypeTests(TestCase):
             weather_slots=_ten_still_slots(),
         )
 
-        with self.assertRaises(ValueError) as caught:
-            resolve(effect_type, terrain_type=terrain)
+        with self._at():
+            with self.assertRaises(ValueError) as caught:
+                resolve(effect_type, terrain)
 
         self.assertIn("swamp", str(caught.exception))
 
@@ -1270,9 +1477,13 @@ class ResolveReturnTypeTests(TestCase):
             key="blizzard",
             effects=(EnvironmentEffect(effect_type, _constant("fast")),),
         )
+        terrain = TerrainType(
+            key="swamp", weather_slots=_ten_slots_of(weather)
+        )
 
-        with self.assertRaises(ValueError) as caught:
-            resolve(effect_type, weather_type=weather)
+        with self._at():
+            with self.assertRaises(ValueError) as caught:
+                resolve(effect_type, terrain)
 
         self.assertIn("blizzard", str(caught.exception))
 
@@ -1453,6 +1664,58 @@ class ConfigTests(TestCase):
         check_settings()
 
         self.assertIs(terrain_enum(), Terrain)
+
+
+class BaseRoomTypeclassTests(TestCase):
+    """CF-24 — CF-26. Evennia's base room typeclass carries the mixin.
+
+    Evennia's setting, not this library's, so it always has a value — there is
+    no absent case, only a class that will not import and one without the
+    mixin.
+    """
+
+    def setUp(self):
+        terrain_enum.cache_clear()
+        terrain_types.cache_clear()
+        night_watches.cache_clear()
+
+    tearDown = setUp
+
+    def test_cf_24_accepts_a_base_room_carrying_the_mixin(self):
+        """CF-24"""
+        # The suite's own setting, so this is the configured instance booting.
+        with override_settings(
+            BASE_ROOM_TYPECLASS="tests.typeclass_stubs.RoomStub"
+        ):
+            check_settings()
+
+    def test_cf_25_refuses_a_base_room_without_the_mixin(self):
+        """CF-25"""
+        with override_settings(
+            BASE_ROOM_TYPECLASS="tests.typeclass_stubs.PlainStub"
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        message = str(caught.exception)
+
+        # Both names: the class the consumer has to change, and what it is
+        # missing. Either alone leaves them looking something up.
+        self.assertIn("PlainStub", message)
+        self.assertIn("EnvironmentRoomMixin", message)
+
+    def test_cf_26_refuses_a_base_room_that_cannot_be_imported(self):
+        """CF-26"""
+        with override_settings(
+            BASE_ROOM_TYPECLASS="tests.nothing_here.Room"
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        # Chained, as the other import failures are: the consumer gets the
+        # setting that is wrong and the import error underneath it.
+        self.assertIsNotNone(caught.exception.__cause__)
+        self.assertIn("tests.nothing_here.Room", str(caught.exception))
 
 
 #: A module whose import raises. The setting naming it is well formed, so the
@@ -1783,7 +2046,7 @@ class RoomRefusalLoggingTests(LogFileMixin, DjangoTestCase):
         self.assertEqual(self._read_back_logs().strip(), "")
 
 
-class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
+class ResolveRefusalLoggingTests(ResolveDriven, LogFileMixin, TestCase):
     """RL-07 — RL-10. What a refusal on the call path leaves behind on disk.
 
     Nobody is watching a console when these fire, and `resolve()` is reached
@@ -1806,8 +2069,9 @@ class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
         """RL-07"""
         effect_type = self._type(requires=("actor",))
 
-        with self.assertRaises(ValueError):
-            resolve(effect_type)
+        with self._at():
+            with self.assertRaises(ValueError):
+                resolve(effect_type, NO_TERRAIN)
 
         logged = self._read_back_logs()
 
@@ -1823,8 +2087,9 @@ class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
             weather_slots=_ten_still_slots(),
         )
 
-        with self.assertRaises(ValueError):
-            resolve(effect_type, terrain_type=terrain)
+        with self._at():
+            with self.assertRaises(ValueError):
+                resolve(effect_type, terrain)
 
         logged = self._read_back_logs()
 
@@ -1837,8 +2102,9 @@ class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
         effect_type = self._type(requires=("actor",))
 
         for _ in range(2):
-            with self.assertRaises(ValueError):
-                resolve(effect_type)
+            with self._at():
+                with self.assertRaises(ValueError):
+                    resolve(effect_type, NO_TERRAIN)
 
         # Deliberately not suppressed. resolve() is on the per-action path, so
         # a log filling with one refusal is how a consumer finds out they have
@@ -1848,7 +2114,8 @@ class ResolveRefusalLoggingTests(LogFileMixin, TestCase):
 
     def test_rl_10_a_resolve_that_answers_writes_no_log_line(self):
         """RL-10"""
-        self.assertEqual(resolve(self._type()), 1.0)
+        with self._at():
+            self.assertEqual(resolve(self._type(), NO_TERRAIN), 1.0)
 
         self.assertEqual(self._read_back_logs().strip(), "")
 
@@ -1985,6 +2252,76 @@ class RoomEnvironmentEffectTests(DjangoTestCase):
         from tests.terrain_tables import MOVE_COST
 
         self.assertEqual(self._room().get_environment_effect(MOVE_COST), 1.0)
+
+
+class RoomTerrainTypeTests(DjangoTestCase):
+    """RM-10 — RM-12. What a room resolves against, and what it stores.
+
+    ``terrain_type`` is the read path and never answers ``None``; ``terrain``
+    is what was stored and still does.
+    """
+
+    def setUp(self):
+        terrain_types.cache_clear()
+
+    tearDown = setUp
+
+    def _room(self):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        return create_object(TerrainRoom, key="room", nohome=True)
+
+    def test_rm_10_no_terrain_resolves_against_the_null_terrain(self):
+        """RM-10"""
+        self.assertIs(self._room().terrain_type, NO_TERRAIN)
+
+    def test_rm_11_a_terrain_with_no_type_resolves_against_the_null(self):
+        """RM-11"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        room.terrain = Terrain.MOUNTAINS
+
+        # PARTIAL_TERRAINS declares SWAMP and nothing else, so MOUNTAINS is a
+        # member with no TerrainType — which CF accepts as a game still being
+        # written. The second route to an absent terrain, and the one a stored
+        # default could never have closed.
+        with override_settings(
+            ENVIRONMENT_TERRAIN_TYPES="tests.terrain_tables.PARTIAL_TERRAINS"
+        ):
+            self.assertIs(room.terrain_type, NO_TERRAIN)
+
+    def test_rm_13_no_terrain_has_the_null_terrains_weather(self):
+        """RM-13"""
+        from evennia_environment import weather as weather_module
+
+        room = self._room()
+
+        with mock.patch.object(
+            weather_module, "current_weather_band", return_value=1
+        ):
+            with mock.patch.object(
+                weather_module, "is_night", return_value=False
+            ):
+                found = room.current_weather
+
+        # A weather, not None: the null terrain's slots are filled like any
+        # other terrain's, so nothing reading this has to test for absence.
+        self.assertIsInstance(found, WeatherType)
+        self.assertIsNone(found.description)
+
+    def test_rm_12_the_null_never_reaches_what_is_stored(self):
+        """RM-12"""
+        room = self._room()
+
+        # The substitution is in the property alone. A builder asking which
+        # rooms still need a terrain reads this, and has to keep its signal.
+        self.assertIsNone(room.terrain)
+        self.assertIsNone(
+            room.attributes.get("terrain", strattr=True)
+        )
 
 
 class TerrainPropertyTests(DjangoTestCase):

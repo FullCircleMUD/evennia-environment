@@ -32,9 +32,8 @@ prompt carrying the weather is composition in the consumer's code.
 can survive a world rebuild. Terrain is declared in the consumer's own code and weather is derived
 from the day number, so neither is state a rebuild could take.
 
-`[TBD — needs discussion: whether a room's terrain assignment is world content that a rebuild
-re-creates. That is settled by how a room carries its terrain, which is open — see
-[test-plan.md](test-plan.md) § Open decisions.]`
+A room's terrain is an Evennia attribute on the room, so a rebuild re-creates it the way it
+re-creates the room — from whatever built the world. Nothing in this library persists it separately.
 
 ## evennia-calendar
 

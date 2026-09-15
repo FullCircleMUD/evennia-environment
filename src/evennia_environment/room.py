@@ -23,6 +23,7 @@ from evennia_environment.refusal import refuse_attribute
 # Aliased: the mixin exposes a ``current_weather`` of its own, and two of
 # that name in one module reads as a mistake even where it is not.
 from evennia_environment.resolve import resolve
+from evennia_environment.terrain import NO_TERRAIN
 from evennia_environment.weather import current_weather as _weather_in_force
 
 
@@ -134,8 +135,9 @@ class EnvironmentRoomMixin:
         class Room(EnvironmentRoomMixin, DefaultRoom):
             pass
 
-    A thin wrapper over ``resolve()``: it finds the room's terrain type and the
-    weather in force, and hands both over. See docs/test-plan.md § RM.
+    A thin wrapper: it finds the room's terrain type and hands it to
+    ``resolve()``, which finds the weather and reads the hour itself. See
+    docs/test-plan.md § RM.
     """
 
     terrain = TerrainProperty()
@@ -151,62 +153,65 @@ class EnvironmentRoomMixin:
         Returns:
             The value, of the effect type's declared return type.
         """
-        # Both optional: a room with no terrain has no weather either, and
-        # resolve answers with the effect type's default.
-        return resolve(
-            effect_type,
-            terrain_type=self.terrain_type,
-            weather_type=self.current_weather,
-            **kwargs,
-        )
+        # The terrain alone: resolve finds the weather from its slots and
+        # reads the hour itself, so neither is worked out twice.
+        return resolve(effect_type, self.terrain_type, **kwargs)
 
     def get_terrain_description(self):
         """Return this room's terrain's description, or ``None``.
 
-        ``None`` for a room with no terrain, and for a terrain that declares
-        no description — both are ordinary, so neither raises.
+        ``None`` for a terrain that declares no description, and for a room
+        with no terrain of its own — the null terrain declares none either.
+        Both are ordinary, so neither raises.
         """
-        terrain = self.terrain_type
-        return None if terrain is None else terrain.description
+        return self.terrain_type.description
 
     @property
     def terrain_type(self):
-        """Return the ``TerrainType`` this room's terrain names, or ``None``.
+        """Return the ``TerrainType`` to resolve against here. Never ``None``.
 
         The room stores a member; the type carrying what that terrain does is
-        the one whose key is the member's value. Boot has already refused a
-        type no member names, so a member with no type is the only miss, and
-        it means a game still being written.
+        the one whose key is the member's value.
+
+        Two ways a room has no terrain of its own — none was assigned, and the
+        member it carries has no type declared yet — and both answer
+        ``NO_TERRAIN``. That declares nothing, so every key falls through to
+        its own default, which is what an absent terrain gave. Substituting
+        here rather than at each reader is what lets the accessors below, and
+        ``resolve()``, drop their absence checks.
+
+        ``self.terrain`` is untouched and still answers ``None``, so a builder
+        asking which rooms still need one keeps its signal.
         """
         terrain = self.terrain
-        return None if terrain is None else terrain_types().get(terrain.value)
+        if terrain is None:
+            return NO_TERRAIN
+
+        return terrain_types().get(terrain.value, NO_TERRAIN)
 
     def get_weather_description(self, day=None):
         """Return the active weather's description, or ``None``.
 
-        ``None`` for a room with no terrain — there is no slot table to read a
-        band against — and for a weather that declares no description. Both
-        are ordinary, so neither raises.
+        ``None`` for a weather that declares no description, which includes
+        the null terrain's — so a room with no terrain of its own answers the
+        same as it did when there was nothing to read. Both are ordinary, so
+        neither raises.
 
         Args:
             day (bool): forces the day weather when true and the night one
                 when false. The current watch decides when it is not given.
         """
-        terrain = self.terrain_type
-        if terrain is None:
-            return None
-
         # None leaves it to the watch; True and False override it.
         night = None if day is None else not day
 
-        return _weather_in_force(terrain, night=night).description
+        return _weather_in_force(self.terrain_type, night=night).description
 
     @property
     def current_weather(self):
-        """Return the ``WeatherType`` in force here, or ``None``.
+        """Return the ``WeatherType`` in force here. Never ``None``.
 
-        ``None`` only when the room has no terrain: the band names a slot,
-        every slot is filled, and both a slot's weathers are always populated.
+        Every terrain has ten filled slots and both of a slot's weathers are
+        always populated — and a room with none of its own resolves against
+        the null terrain, whose slots are filled like any other's.
         """
-        terrain = self.terrain_type
-        return None if terrain is None else _weather_in_force(terrain)
+        return _weather_in_force(self.terrain_type)

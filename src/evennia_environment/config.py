@@ -33,6 +33,10 @@ SETTING_TERRAIN_TYPES = "ENVIRONMENT_TERRAIN_TYPES"
 SETTING_WEATHER_SEED = "ENVIRONMENT_WEATHER_SEED"
 SETTING_NIGHT_WATCHES = "ENVIRONMENT_NIGHT_WATCHES"
 
+#: Evennia's, not this library's. Checked rather than declared: it always has
+#: a value, and what matters is that the class it names carries the mixin.
+SETTING_BASE_ROOM = "BASE_ROOM_TYPECLASS"
+
 #: What each collected problem is prefixed with in the refusal. One per line,
 #: so a consumer with two things wrong works through a list rather than a
 #: paragraph. Named so a test can count problems without pinning any wording.
@@ -104,6 +108,12 @@ def check_settings() -> None:
         _check_night_watches()
     except ImproperlyConfigured as exc:
         problems.extend(str(exc).split(_JOIN))
+
+    try:
+        _check_base_room_typeclass()
+    except ImproperlyConfigured as exc:
+        problems.extend(str(exc).split(_JOIN))
+        _collect(causes, exc)
 
     if problems:
         _refuse(problems, causes)
@@ -297,6 +307,49 @@ def _check_night_watches():
         raise ImproperlyConfigured(
             f"{SETTING_NIGHT_WATCHES} names {', '.join(out_of_range)}, which "
             f"are not watches. The calendar's day is six, numbered 1 to 6."
+        )
+
+
+def _check_base_room_typeclass():
+    """Refuse a base room typeclass that cannot carry a terrain.
+
+    Evennia's setting rather than this library's, so there is no absent case —
+    it always has a value. What is checked is that the class it names carries
+    ``EnvironmentRoomMixin``, because a consumer who installs the app and never
+    mixes it in gets rooms that answer every key with its default and nothing
+    saying why.
+
+    **What this proves is bounded.** A room of that class *can* hold a terrain;
+    it does not follow that any room *has* one, since the property defaults to
+    ``None``. Nor does it reach a room built as some other class by a prototype
+    or a world file. The refusal says the default room typeclass lacks the
+    mixin and claims nothing further.
+    """
+    from django.conf import settings
+
+    # Inside the function: room.py imports Evennia, and this module is imported
+    # before the app registry is built. check_settings() runs from ready(), by
+    # which time it is.
+    from evennia_environment.room import EnvironmentRoomMixin
+
+    path = getattr(settings, SETTING_BASE_ROOM, None)
+
+    try:
+        room = import_string(path)
+    except Exception as exc:
+        raise ImproperlyConfigured(
+            f"{SETTING_BASE_ROOM} names {path!r}, which could not be loaded, "
+            f"so whether your rooms carry a terrain was not examined."
+        ) from exc
+
+    # isinstance(room, type) first: issubclass raises TypeError rather than
+    # answering when handed something that is not a class.
+    if not (isinstance(room, type) and issubclass(room, EnvironmentRoomMixin)):
+        raise ImproperlyConfigured(
+            f"{SETTING_BASE_ROOM} names {path!r}, which does not carry "
+            f"EnvironmentRoomMixin. Rooms built as it hold no terrain and "
+            f"answer every effect key with its default. Mix it in — "
+            f"class Room(EnvironmentRoomMixin, DefaultRoom)."
         )
 
 

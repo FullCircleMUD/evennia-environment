@@ -57,6 +57,11 @@ class Room(EnvironmentRoomMixin, DefaultRoom):
 
 Nothing to declare. `terrain` comes with the mixin.
 
+The library checks this at boot: whatever `BASE_ROOM_TYPECLASS` names has to carry the mixin, or the
+instance refuses to start. That catches installing the app and never mixing it in — otherwise every
+room answers every key with its default and nothing says why. It checks the default room class only,
+so a room built as some other class by a prototype or a world file is not covered.
+
 ## 6. Start the calendar clock
 
 ```python
@@ -130,7 +135,12 @@ being written, or one with no night. Not declaring the setting at all is not.
 - **`room.db.terrain = ...`.** Assigning through `.db` writes past the property and is not validated.
   That is Evennia's behaviour and cannot be closed from here. Assign `room.terrain` instead.
 - **Every enum member having a terrain type.** Accepted deliberately: a member with none is a game
-  still being written. Rooms of that terrain answer with each effect type's default.
+  still being written. Rooms of that terrain resolve against the null terrain, so every key answers
+  with its own default.
+- **Whether a room actually has a terrain.** The boot check proves your default room class *can*
+  hold one, not that anything assigned one. A room with none answers every key with its default.
+- **Rooms built as some other class.** A prototype or a world file naming its own room typeclass
+  bypasses `BASE_ROOM_TYPECLASS`, and nothing checks those.
 
 ## When something is refused
 
@@ -142,6 +152,7 @@ still there afterwards.
 |---|---|
 | `evennia-environment cannot start:` and a list | A setting is wrong. Every problem found is listed, so fix them all in one pass |
 | The same, with a traceback under it | A module one of your settings names would not import. The traceback is the line that broke |
+| `BASE_ROOM_TYPECLASS names … which does not carry EnvironmentRoomMixin` | Your room typeclass is missing the mixin. Add it and restart |
 | `Mossy Hollow (#1): terrain cannot be 'swmap'` | A room was assigned a terrain no enum member names. The key and dbref are there so you can find it |
 | `the terrain 'swamp' answered 'movement_cost' with …` | A helper handed back the wrong type. The contributor named is the one that got it wrong |
 
@@ -212,10 +223,12 @@ BLIZZARD = WeatherType(
 
 
 # 4. The terrains: their own effects, always in force, and ten weather slots.
+#    An effect may declare a night helper as well; leave it out and the day
+#    one answers whatever the hour.
 DESERT = TerrainType(
     key="desert",
     description="Dunes run to the horizon in every direction.",
-    effects=(EnvironmentEffect(THIRST_RATE, Add(1)),),
+    effects=(EnvironmentEffect(THIRST_RATE, Add(1), night=Constant(0)),),
     weather_slots={
         1: WeatherSlot(CLEAR),
         2: WeatherSlot(CLEAR),
@@ -233,7 +246,7 @@ DESERT = TerrainType(
 MOUNTAINS = TerrainType(
     key="mountains",
     description="Bare rock and scree, falling away on every side.",
-    effects=(EnvironmentEffect(MOVE_COST, Constant(2.0)),),
+    effects=(EnvironmentEffect(MOVE_COST, Constant(2.0), night=Constant(3.0)),),
     weather_slots={
         1: WeatherSlot(CLEAR),
         2: WeatherSlot(CLEAR),
@@ -261,3 +274,9 @@ Reading it back out of that:
   are a winter event; the desert's worst heat is a summer one.
 - **`WeatherSlot` is always what a slot holds.** A weather that does not change at night is
   `WeatherSlot(CLEAR)`, and the slot fills its night from its day.
+- **Two ways a thing differs after dark, and they do different jobs.** A slot's `night=` swaps the
+  whole weather — different description, different effects, a different name. An effect's `night=`
+  changes one value for one key. The desert does both: a scorching day becomes a freezing night, and
+  its own thirst stops climbing once the sun is down. The mountains do neither to their weather and
+  only cost more to cross.
+- **Neither is required.** Leave `night=` off and the day answer stands whatever the hour.
