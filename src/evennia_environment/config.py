@@ -49,6 +49,10 @@ _WATCHES_EXAMPLE = "(6, 1)"
 #: The calendar's day is six watches, numbered from one.
 WATCHES = tuple(range(1, 7))
 
+#: Kwarg names a caller cannot use, because ``resolve()`` takes both
+#: positionally and Python would raise before either function ran a line.
+RESERVED_KWARGS = frozenset({"effect_type", "terrain_type"})
+
 #: Every terrain has exactly this many weather slots, numbered from one.
 #: Counting from one matches evennia-calendar, which counts every calendar
 #: position the same way.

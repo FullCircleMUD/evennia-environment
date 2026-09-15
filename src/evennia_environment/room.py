@@ -18,8 +18,12 @@ See docs/test-plan.md § TP.
 # no engine-free equivalent to import instead.
 from evennia.typeclasses.attributes import AttributeProperty
 
-from evennia_environment.config import terrain_enum, terrain_types
-from evennia_environment.refusal import refuse_attribute
+from evennia_environment.config import (
+    RESERVED_KWARGS,
+    terrain_enum,
+    terrain_types,
+)
+from evennia_environment.refusal import refuse, refuse_attribute
 # Aliased: the mixin exposes a ``current_weather`` of its own, and two of
 # that name in one module reads as a mistake even where it is not.
 from evennia_environment.resolve import resolve
@@ -142,17 +146,39 @@ class EnvironmentRoomMixin:
 
     terrain = TerrainProperty()
 
-    def get_environment_effect(self, effect_type, **kwargs):
+    def get_environment_effect(self, effect_type, /, **kwargs):
         """Return what ``effect_type`` answers in this room.
+
+        ``effect_type`` is positional-only so a caller's kwarg of that name
+        lands in ``kwargs`` and is refused below, rather than raising Python's
+        own ``TypeError`` before this runs.
 
         Args:
             effect_type (EnvironmentEffectType): the key being asked about.
             **kwargs: whatever this key requires, and anything else a helper
-                may want.
+                may want. Not ``effect_type`` or ``terrain_type``.
 
         Returns:
             The value, of the effect type's declared return type.
+
+        Raises:
+            ValueError: if a kwarg uses a reserved name.
         """
+        # Refused here because this is the only place kwargs is still separate
+        # from the positional arguments. Left alone, resolve() gets the terrain
+        # twice and Python raises before it runs — naming a parameter the
+        # caller never passed, from a call where no terrain is visible.
+        reserved = sorted(RESERVED_KWARGS & kwargs.keys())
+        if reserved:
+            refuse(
+                f"{_named(self)}: {', '.join(repr(name) for name in reserved)} "
+                f"cannot be passed to get_environment_effect. "
+                f"{' and '.join(sorted(repr(n) for n in RESERVED_KWARGS))} are "
+                f"the library's own — the effect type is the first argument and "
+                f"the terrain comes from the room. Name your kwarg something "
+                f"else."
+            )
+
         # The terrain alone: resolve finds the weather from its slots and
         # reads the hour itself, so neither is worked out twice.
         return resolve(effect_type, self.terrain_type, **kwargs)

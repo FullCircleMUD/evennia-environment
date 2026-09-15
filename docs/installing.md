@@ -101,6 +101,11 @@ line = room.get_weather_description()
 desc = room.get_terrain_description()
 ```
 
+Everything past the effect type is yours, reaches every helper, and is named whatever you like — with
+two exceptions. **`effect_type` and `terrain_type` are reserved** and refused: the effect type is the
+first argument and the terrain comes from the room. A helper wanting some other terrain gets a kwarg
+named something else.
+
 ## Required settings
 
 | Setting | What it does | Without it |
@@ -141,6 +146,9 @@ being written, or one with no night. Not declaring the setting at all is not.
   hold one, not that anything assigned one. A room with none answers every key with its default.
 - **Rooms built as some other class.** A prototype or a world file naming its own room typeclass
   bypasses `BASE_ROOM_TYPECLASS`, and nothing checks those.
+- **A reserved kwarg passed to `resolve()` directly.** The room's accessor refuses it with a message;
+  calling `resolve()` yourself gets Python's own `TypeError` instead, which names the argument but not
+  the reason.
 
 ## When something is refused
 
@@ -153,6 +161,7 @@ still there afterwards.
 | `evennia-environment cannot start:` and a list | A setting is wrong. Every problem found is listed, so fix them all in one pass |
 | The same, with a traceback under it | A module one of your settings names would not import. The traceback is the line that broke |
 | `BASE_ROOM_TYPECLASS names … which does not carry EnvironmentRoomMixin` | Your room typeclass is missing the mixin. Add it and restart |
+| `Mossy Hollow (#1): 'terrain_type' cannot be passed to get_environment_effect` | A kwarg used a reserved name. Rename yours |
 | `Mossy Hollow (#1): terrain cannot be 'swmap'` | A room was assigned a terrain no enum member names. The key and dbref are there so you can find it |
 | `the terrain 'swamp' answered 'movement_cost' with …` | A helper handed back the wrong type. The contributor named is the one that got it wrong |
 

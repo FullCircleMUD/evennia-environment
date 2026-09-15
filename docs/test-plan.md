@@ -678,6 +678,7 @@ shim. Called from a bare script the refusal still raises; the line goes to `pre-
 | RL-08 | A helper answering with the wrong type lands a line naming the contributor that got it wrong | `test_rl_08_a_wrong_type_lands_a_line_naming_the_contributor` |
 | RL-09 | Two calls hitting the same problem land two lines — repeats are deliberately not suppressed, so a filling log is the signal that something needs fixing | `test_rl_09_the_same_problem_twice_lands_two_lines` |
 | RL-10 | A resolve that answers writes no log line | `test_rl_10_a_resolve_that_answers_writes_no_log_line` |
+| RL-11 | A reserved kwarg name lands a line naming the room and both reserved names. It is the consumer's own code that is wrong, not a player's input, so it raises as well — but whoever fixes it is rarely the one who saw the traceback | `test_rl_11_a_reserved_kwarg_lands_a_line` |
 
 ## DR — `refuse()`, the one route a declaration refusal takes
 
@@ -991,9 +992,9 @@ cost = room.get_environment_effect(MOVE_COST, actor=character)
 line = room.get_weather_description()
 ```
 
-**Every method is a thin wrapper.** The room finds its terrain and its weather; `resolve()` does the
-work. `get_environment_effect` passes both to it, and both being optional is what lets a room with no
-terrain answer with the effect type's default rather than raising.
+**Every method is a thin wrapper.** The room finds its terrain; `resolve()` finds the weather, reads
+the hour and does the work. A room with no terrain of its own hands over the null terrain, so it
+answers with the effect type's default rather than raising.
 
 | ID | Case | Test function |
 |---|---|---|
@@ -1007,6 +1008,25 @@ terrain answer with the effect type's default rather than raising.
 | RM-07 | A weather declaring no description returns `None` rather than raising | `test_rm_07_a_weather_with_no_description_returns_none` |
 | RM-09 | `get_weather_description` on a room with no terrain returns `None` — the null terrain's slots hold a weather that declares no description, so the answer is the same one an absent terrain gave | `test_rm_09_a_room_with_no_terrain_has_no_weather` |
 | RM-13 | `current_weather` on a room with no terrain is the null terrain's weather, not `None` — the property never answers absence, as `terrain_type` does not | `test_rm_13_no_terrain_has_the_null_terrains_weather` |
+
+### Reserved kwarg names
+
+`get_environment_effect` passes the caller's kwargs to `resolve()`, which takes the effect type and
+the terrain positionally. A kwarg of either name collides with the parameter, and Python raises
+before `resolve()` runs a line — naming a parameter the caller never passed, from a call where no
+terrain is visible.
+
+Refused rather than allowed. A helper handed `terrain_type` would reasonably read it as *the*
+terrain, which is the room's and is not the caller's to supply; a helper wanting some other terrain
+names it something else.
+
+It sits here rather than in `resolve()`, which is the only place `kwargs` is still separate from the
+positional arguments. A direct `resolve()` caller still gets Python's `TypeError`, and can see the
+signature that explains it.
+
+| ID | Case | Test function |
+|---|---|---|
+| RM-14 | A kwarg named `effect_type` or `terrain_type` is refused, naming both reserved names, so the caller renames theirs rather than reading a `TypeError` about an argument they did not pass | `test_rm_14_refuses_a_kwarg_named_after_a_parameter` |
 
 ### The terrain a room resolves against
 

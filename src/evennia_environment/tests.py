@@ -2046,7 +2046,7 @@ class RoomRefusalLoggingTests(LogFileMixin, DjangoTestCase):
         self.assertEqual(self._read_back_logs().strip(), "")
 
 
-class ResolveRefusalLoggingTests(ResolveDriven, LogFileMixin, TestCase):
+class ResolveRefusalLoggingTests(ResolveDriven, LogFileMixin, DjangoTestCase):
     """RL-07 — RL-10. What a refusal on the call path leaves behind on disk.
 
     Nobody is watching a console when these fire, and `resolve()` is reached
@@ -2111,6 +2111,29 @@ class ResolveRefusalLoggingTests(ResolveDriven, LogFileMixin, TestCase):
         # something to fix — suppression would make the symptom quieter and
         # cost code carried for the life of the library.
         self.assertEqual(self._read_back_logs().count("[ERROR]"), 2)
+
+    def test_rl_11_a_reserved_kwarg_lands_a_line(self):
+        """RL-11"""
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+        from tests.terrain_tables import MOVE_COST
+
+        room = create_object(TerrainRoom, key="room", nohome=True)
+        self._clear_logs()
+
+        # A mistake in the consumer's own code rather than a player's input, so
+        # it raises — and the file is what is still there when whoever fixes it
+        # gets to it, which is rarely whoever saw the traceback.
+        with self.assertRaises(ValueError):
+            room.get_environment_effect(MOVE_COST, terrain_type="mine")
+
+        logged = self._read_back_logs()
+
+        self.assertIn("[ERROR]", logged)
+        self.assertIn("terrain_type", logged)
+        self.assertIn("effect_type", logged)
+        self.assertIn(room.key, logged)
 
     def test_rl_10_a_resolve_that_answers_writes_no_log_line(self):
         """RL-10"""
@@ -2246,6 +2269,24 @@ class RoomEnvironmentEffectTests(DjangoTestCase):
         with mock.patch.object(weather, "current_weather_band", return_value=1):
             with mock.patch.object(weather, "is_night", return_value=False):
                 self.assertEqual(room.get_environment_effect(MOVE_COST), 6.0)
+
+    def test_rm_14_refuses_a_kwarg_named_after_a_parameter(self):
+        """RM-14"""
+        from tests.terrain_tables import MOVE_COST
+
+        room = self._room()
+
+        for reserved in ("effect_type", "terrain_type"):
+            with self.subTest(kwarg=reserved):
+                with self.assertRaises(ValueError) as caught:
+                    room.get_environment_effect(MOVE_COST, **{reserved: "mine"})
+
+                message = str(caught.exception)
+
+                # Both names, so one refusal tells the caller the whole rule
+                # rather than sending them back for the second one.
+                self.assertIn("effect_type", message)
+                self.assertIn("terrain_type", message)
 
     def test_rm_02_a_room_with_no_terrain_answers_the_default(self):
         """RM-02"""

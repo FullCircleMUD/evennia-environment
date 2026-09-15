@@ -76,6 +76,19 @@ valley at dusk. That one is terrain and weather together, and a consumer asks it
 they declared. Naming the clock for darkness put both under one word, and a consumer reaching for the
 watches to light a room would have got the wrong answer for every cave.
 
+## Two kwarg names are the library's
+
+`effect_type` and `terrain_type` are refused as caller kwargs. Both are taken positionally, so one of
+that name collides with the parameter and Python raises before either function runs a line — naming
+an argument the caller never passed, from a call where no terrain is visible.
+
+Refused rather than allowed through. A helper handed `terrain_type` would reasonably read it as *the*
+terrain, which is the room's and not the caller's to supply.
+
+The check sits in the room accessor, which is the only place a caller's kwargs are still separate
+from the positional arguments, and the accessor takes its effect type positional-only so a kwarg of
+that name reaches the check rather than Python's error.
+
 ## Pull, not push
 
 A call site asks a question at a moment it was already running, and acts on what comes back. The

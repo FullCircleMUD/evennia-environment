@@ -19,8 +19,11 @@ mountain pass can cost more to cross after dark.
   is dark are different questions, and a consumer asks the second as an effect key.
 - Boot refuses a `BASE_ROOM_TYPECLASS` that does not carry the mixin, verified against a real gamedir
   typeclass rather than only the suite's stubs.
+- `effect_type` and `terrain_type` are refused as caller kwargs. Both are taken positionally, so one
+  of that name collided with the parameter and Python raised before either function ran — naming an
+  argument the caller never passed.
 
-171 tests via `python runtests.py`. Every case in [test-plan.md](test-plan.md) has a test and every
+173 tests via `python runtests.py`. Every case in [test-plan.md](test-plan.md) has a test and every
 test traces to a case.
 
 **Not tried against a real game.** A consumer renaming the watches setting is what unbreaks their
