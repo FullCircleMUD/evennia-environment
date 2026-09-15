@@ -48,6 +48,11 @@ DATABASES = {
 # exist, and SQLite reports it when the test transaction closes.
 DEFAULT_HOME = None
 
+# The suite boots as a configured instance. A case wanting the setting
+# absent or wrong overrides it.
+ENVIRONMENT_TERRAIN_ENUM = "tests.terrain_enums.Terrain"
+ENVIRONMENT_TERRAIN_TYPES = "tests.terrain_tables.TERRAINS"
+
 # Required Django bits
 SECRET_KEY = "test-only-secret"
 TEST_ENVIRONMENT = True

@@ -32,7 +32,12 @@ from evennia_environment.helpers import (
 )
 from evennia_environment.resolve import resolve
 from evennia_environment.terrain import TerrainType
-from evennia_environment.weather import WeatherSlot, WeatherType
+from evennia_environment.weather import (
+    WeatherSlot,
+    WeatherType,
+    current_weather_band,
+    weather_band,
+)
 
 __version__ = "0.0.1"
 
@@ -50,5 +55,7 @@ __all__ = [
     "TerrainType",
     "WeatherSlot",
     "WeatherType",
+    "current_weather_band",
     "resolve",
+    "weather_band",
 ]

@@ -10,11 +10,12 @@ at module scope.
 
 from evennia import DefaultRoom
 
-from evennia_environment.room import TerrainProperty
-from tests.terrain_enums import Terrain
+from evennia_environment.room import EnvironmentRoomMixin
 
 
-class TerrainRoom(DefaultRoom):
-    """A room that declares its terrain, as a consumer's room typeclass does."""
+class TerrainRoom(EnvironmentRoomMixin, DefaultRoom):
+    """A room carrying the mixin, as a consumer's room typeclass does.
 
-    terrain = TerrainProperty(Terrain)
+    It declares nothing: the mixin brings ``terrain``, and the property reads
+    the game's enum from the setting.
+    """

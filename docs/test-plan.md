@@ -25,6 +25,9 @@ designed is in [Open decisions](#open-decisions) below.
 | `TT` | `TerrainType` — the shape a consumer declares one terrain in |
 | `TP` | `TerrainProperty` — the attribute a room's terrain is held in |
 | `RS` | `resolve()` — what a key answers, given a terrain and a weather |
+| `CF` | The setting, and the boot check that refuses a bad one |
+| `WB` | The weather band — one number a day, for the whole game |
+| `RM` | `EnvironmentRoomMixin` — what a room answers about its surroundings |
 
 ## Fixtures
 
@@ -492,16 +495,16 @@ decides when it is shown.
 
 ## TP — `TerrainProperty`
 
-The `AttributeProperty` a room's terrain is held in. It is declared with the consumer's terrain enum,
-and validates that what is assigned to it is a member of that enum:
+The `AttributeProperty` a room's terrain is held in. It validates that what is assigned is a member
+of the game's terrain enum, which it reads from the setting through `config.terrain_enum()`:
 
 ```python
-class Room(DefaultRoom):
-    terrain = TerrainProperty(Terrain)
+class Room(EnvironmentRoomMixin, DefaultRoom):
+    pass            # the mixin brings terrain with it
 ```
 
-The enum reaches the property at the declaration, the way `evennia-equipment`'s properties take their
-slots and weights. Nothing here needs a setting, a registry or a declaration module.
+Nothing is declared per typeclass. The enum arrives from `ENVIRONMENT_TERRAIN_ENUM`, resolved once
+at boot and held for the process, so the property takes no arguments and the mixin can carry it.
 
 **A string goes in the database; a member comes back out.** `at_set()` takes either the member or its
 value and stores the value; `at_get()` resolves the value back to the member. So a consumer reads
@@ -526,16 +529,14 @@ to `True`, so the first read of an unset attribute writes the default through `a
 the default has to be acceptable. Once a terrain is stored, assigning `None` is refused like any
 other change.
 
-**Two refusals, two exception types, split by who got it wrong.** A bad *assignment* is an
-`AttributeError` — that is the descriptor protocol's own signal, and what `evennia-equipment` raises
-from its `at_set()`. A bad *declaration*, TP-02, is a `ValueError`, like every other declaration in
-this library, because it is a line in the consumer's class body rather than a value arriving at
-runtime.
+**A bad assignment is an `AttributeError`** — the descriptor protocol's own signal, and what
+`evennia-equipment` raises from its `at_set()`. There is no declaration to get wrong here any more:
+the enum comes from the setting, and a bad one is refused at boot as an `ImproperlyConfigured`.
 
 **The property lives in `room.py` and is not re-exported from the package.** It imports Evennia, and
 `__init__.py` runs while Django is still building its app registry. `evennia-equipment` exports
 nothing from its package for the same reason. A consumer imports
-`from evennia_environment.room import TerrainProperty`.
+`from evennia_environment.room import EnvironmentRoomMixin`.
 
 **`at_set()` fires only on assignment through the property.** `room.db.terrain = "swamp"` writes past
 it unvalidated. That is Evennia's behaviour and cannot be closed from here.
@@ -545,7 +546,6 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | ID | Case | Test function |
 |---|---|---|
 | TP-01 | A property declared with an enum reads as `None` on a room nothing has been assigned to | `test_tp_01_an_unassigned_room_has_no_terrain` |
-| TP-02 | Declaring the property with something that is not an enum class is refused | `test_tp_02_refuses_a_declaration_that_is_not_an_enum` |
 
 ### Assignment and storage
 
@@ -582,6 +582,7 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 
 | ID | Why |
 |---|---|
+| TP-02 | Was "declaring the property with something that is not an enum class is refused". There is nothing to declare it with now — the enum comes from the setting, so that check is CF-04, made once at boot rather than per typeclass |
 | TP-06 | Was "`None` is refused". Reversed by `autocreate=True` — the default is pushed through `at_set()` on first read, so refusing `None` makes an unassigned room unreadable. TP-11 and TP-14 carry the two halves of what replaced it |
 
 ## RS — `resolve(effect_type, terrain_type, weather_type, **kwargs)`
@@ -638,6 +639,176 @@ is at fault: the call site for a missing kwarg, the contributor for a bad return
 | RS-09 | A default returning something other than the declared return type is refused, and the refusal says it was the default | `test_rs_09_refuses_a_default_returning_the_wrong_type` |
 | RS-10 | A terrain helper returning the wrong type is refused, and the refusal says it was the terrain | `test_rs_10_refuses_a_terrain_helper_returning_the_wrong_type` |
 | RS-11 | A weather helper returning the wrong type is refused, and the refusal says it was the weather | `test_rs_11_refuses_a_weather_helper_returning_the_wrong_type` |
+
+## CF — the setting and `check_settings()`
+
+The consumer's terrain enum reaches the library as a setting naming it:
+
+```python
+ENVIRONMENT_TERRAIN_ENUM = "world.environment.Terrain"
+ENVIRONMENT_TERRAIN_TYPES = "world.environment.TERRAINS"
+```
+
+**Two settings, one file.** The enum names the terrains a game has; `TERRAINS` is the collection of
+`TerrainType` carrying what each one does. They join on the string: `Terrain.SWAMP.value` is
+`"swamp"`, which is the `TerrainType`'s key. No mapping to declare and none to keep in sync.
+
+`config.py` holds the setting name, `check_settings()` and the accessor; `apps.py` calls the check
+from `ready()`. Checking at boot rather than at first use is the point — validation deferred means a
+misconfigured instance starts cleanly, runs, and then fails in front of a player.
+
+**There is no terrain list the library could invent**, so the setting has no safe default. Without it
+the instance does not start.
+
+**Problems are collected, not reported one per restart.** A consumer with two things wrong gets both
+in one refusal and fixes them in one pass. Where a check cannot run because an earlier one failed —
+nothing to inspect if the module did not import — that is said rather than guessed at.
+
+**An enum with no members is accepted.** It has a correct reading: someone booting to check their
+install before writing content. What is refused is not declaring one at all.
+
+**A third setting, naming the declaration module, lands when effect-type registration needs a known
+moment to happen in.** Nothing does yet, and a setting with no consumer is a setting to get wrong.
+
+### The setting
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-01 | The setting absent is refused, and the refusal shows what a value looks like | `test_cf_01_refuses_an_absent_setting` |
+| CF-02 | A setting that is empty or not a string is refused | `test_cf_02_refuses_a_setting_that_is_empty_or_not_a_string` |
+| CF-03 | A path that cannot be imported is refused, and the original import error is chained rather than swallowed | `test_cf_03_refuses_a_path_that_cannot_be_imported` |
+| CF-04 | A path naming something that is not an `Enum` class is refused | `test_cf_04_refuses_a_path_naming_something_that_is_not_an_enum` |
+
+### The enum
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-05 | An enum with no members is accepted, alongside no terrain types — booting to check an install before writing content is a correct reading. An empty enum beside a populated table is a different thing, and CF-12 refuses it | `test_cf_05_accepts_an_enum_with_no_members` |
+| CF-06 | Duplicate values are refused, naming the members Python folded. `JUNGLE = "forest"` silently becomes a second name for `FOREST`, leaving the game a terrain short with nothing raised | `test_cf_06_refuses_duplicate_values` |
+| CF-07 | Values that are not strings are refused, naming them — a terrain's value is what a room stores and what YAML writes | `test_cf_07_refuses_values_that_are_not_strings` |
+
+### The terrain types
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-10 | The terrain-types setting absent is refused | `test_cf_10_refuses_an_absent_terrain_types_setting` |
+| CF-11 | A path naming something that is not a collection of `TerrainType` is refused | `test_cf_11_refuses_terrain_types_that_are_not_terrain_types` |
+| CF-12 | A terrain type whose key names no member of the enum is refused, naming it — it would be unreachable, since a room can only store a member's value | `test_cf_12_refuses_a_terrain_type_no_enum_member_names` |
+| CF-13 | An enum member with no terrain type is accepted. Declaring the enum and filling in the terrains afterwards is how a game gets written | `test_cf_13_accepts_an_enum_member_with_no_terrain_type` |
+
+### Collecting
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-08 | Two independent problems in one enum are reported together, in one refusal | `test_cf_08_reports_two_independent_problems_together` |
+| CF-14 | A problem in each setting is reported together — the two are independent, so stopping at the first would cost a restart | `test_cf_14_reports_a_problem_in_each_setting_together` |
+
+### Reading it back
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-09 | With a valid setting the accessor returns the consumer's enum, and `check_settings()` passes | `test_cf_09_a_valid_setting_resolves_to_the_enum` |
+
+## WB — the weather band
+
+One number a day, one to ten, for the whole game. Every terrain reads the same band and answers with
+its own weather, which is what makes neighbouring places correlated rather than independent — one
+room is not snowing while the next is clear.
+
+**Derived, never rolled.** `sha256(seed:day)` taken modulo six, then floored at three. Nothing is
+stored in the database, no two processes have to agree on anything, and any day past or future can be
+asked for.
+
+**The hash gives three to eight; the season shifts it into the ten slots a terrain has.** Summer
+moves it up two, winter down two, spring and autumn not at all:
+
+| Season | Shift | Range |
+|---|---|---|
+| Winter | −2 | 1 – 6 |
+| Spring, Autumn | 0 | 3 – 8 |
+| Summer | +2 | 5 – 10 |
+
+So slots 1 and 2 are reachable only in winter and 9 and 10 only in summer — a mountain snows in
+winter and not in summer, and its clear summer day never happens in winter. The middle is reachable
+in any season, which is what spring and autumn get. Whether slot 1 holds the good weather or the bad
+is the consumer's; the library hands over a number.
+
+**The season is required, not defaulted.** A band without one is not meaningful. `GameDate` carries
+both the day and the season, so working one out costs a single call.
+
+**Not Python's `hash()`.** It is randomised per process for strings, so two processes would disagree
+about the weather; and it is the identity for small ints, so `hash(day) % 6` is a metronome rather
+than weather.
+
+**The seed is a setting with a safe default**, so it is not a boot check. Changing it rerolls a
+world's entire weather history, and it is what stops two games on the same calendar having identical
+skies.
+
+Two surfaces: `weather_band(day, seed)` is the pure function; `current_weather_band()` is today's,
+held between rollovers.
+
+**Held, not recomputed.** Asking the calendar what day it is costs 3,600 ns against the hash's 514,
+so the saving is not in caching the hash — it is in not asking at all. `day_changed` refreshes the
+stored value, and a read only computes when there is nothing stored. One calculation, two triggers.
+
+`[TBD — needs discussion: the roll happens at midnight, because that is when `day_changed` fires.
+Putting it at dawn needs a declared dawn watch, and no setting names one. The same declaration the
+day/night weather slots are waiting on.]`
+
+### The band itself
+
+| ID | Case | Test function |
+|---|---|---|
+| WB-01 | The band is an integer from 1 to 10 whatever the season, so it always names a slot a terrain has | `test_wb_01_the_band_is_one_to_ten` |
+| WB-02 | The same day and seed always give the same band — derived rather than rolled, so no process has to agree with another | `test_wb_02_the_same_day_and_seed_always_give_the_same_band` |
+| WB-03 | Consecutive days do not walk in step. Every band appears across a run of days, rather than the sawtooth `hash()` on an int would give | `test_wb_03_consecutive_days_do_not_walk_in_step` |
+| WB-04 | A different seed gives a different band for the same day, so two games on one calendar do not share a sky | `test_wb_04_a_different_seed_gives_a_different_band` |
+
+### The season's shift
+
+| ID | Case | Test function |
+|---|---|---|
+| WB-08 | Winter shifts the band down two, landing in 1 to 6 — the only season that reaches slots 1 and 2 | `test_wb_08_winter_shifts_the_band_down` |
+| WB-09 | Summer shifts it up two, landing in 5 to 10 — the only season that reaches slots 9 and 10 | `test_wb_09_summer_shifts_the_band_up` |
+| WB-10 | Spring and autumn do not shift it, landing in 3 to 8, and give the same band as each other for a day | `test_wb_10_spring_and_autumn_do_not_shift_the_band` |
+
+### Today's band
+
+| ID | Case | Test function |
+|---|---|---|
+| WB-05 | A read with nothing held computes it — the lazy trigger, which is what answers between a restart and the next rollover | `test_wb_05_a_read_with_nothing_held_computes_it` |
+| WB-06 | A second read returns what is held without recomputing | `test_wb_06_a_second_read_does_not_recompute` |
+| WB-07 | `day_changed` refreshes what is held, so a rollover takes effect without anything asking the calendar | `test_wb_07_day_changed_refreshes_what_is_held` |
+
+## RM — `EnvironmentRoomMixin`
+
+**A placeholder.** The three methods exist with their real signatures and no behaviour. Mixed into a
+consumer's own room typeclass, beside their terrain declaration — the mixin does not declare
+`terrain` itself, because the property needs the consumer's enum and the library cannot know it.
+
+```python
+class Room(EnvironmentRoomMixin, DefaultRoom):
+    terrain = TerrainProperty(Terrain)
+```
+
+**Two things are missing under every one of them**, and no case below can be covered until they exist:
+the route from the stored terrain to its `TerrainType`, and which of the terrain's ten weather slots
+is active.
+
+`get_weather_description(day=True)` takes the day-or-night flag as an argument rather than working it
+out, because which watches are dark is still undeclared. That argument goes when the library can ask
+the calendar itself.
+
+| ID | Case | Test function |
+|---|---|---|
+| RM-01 | `get_environment_effect` answers through this room's terrain and its active weather | |
+| RM-02 | A room with no terrain still answers — the effect type's default | |
+| RM-03 | `get_terrain_description` returns this terrain's description, found by matching the stored member's value against the declared terrain types' keys | `test_rm_03_returns_the_terrains_description` |
+| RM-04 | `get_terrain_description` on a room with no terrain returns `None` | `test_rm_04_a_room_with_no_terrain_has_no_description` |
+| RM-08 | `get_terrain_description` on a terrain declaring no description returns `None` rather than raising | `test_rm_08_a_terrain_with_no_description_returns_none` |
+| RM-05 | `get_weather_description` returns the active weather's description | |
+| RM-06 | `get_weather_description(day=False)` returns the night weather's description, which differs only where the slot declared one | |
+| RM-07 | A weather declaring no description returns `None` rather than raising | |
 
 ## Current thinking
 

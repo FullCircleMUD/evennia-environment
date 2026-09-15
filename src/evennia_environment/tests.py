@@ -6,11 +6,22 @@ function here carries its case ID as its docstring so the trail reads both ways.
 """
 
 import dataclasses
-from unittest import TestCase
+from unittest import TestCase, mock
 
 # The TP cases create real objects, so they need a database around them. The
 # rest are pure Python and stay on the lighter base.
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase as DjangoTestCase
+from django.test import override_settings
+
+from evennia_environment.config import (
+    PROBLEM_PREFIX,
+    SETTING_TERRAIN_ENUM,
+    SETTING_TERRAIN_TYPES,
+    check_settings,
+    terrain_enum,
+    terrain_types,
+)
 
 import evennia_environment
 from evennia_environment import (
@@ -26,7 +37,9 @@ from evennia_environment import (
     TerrainType,
     WeatherSlot,
     WeatherType,
+    current_weather_band,
     resolve,
+    weather_band,
 )
 
 
@@ -316,6 +329,128 @@ class StockHelperContractTests(TestCase):
                     key="movement_cost", return_type=float, default=helper
                 )
                 EnvironmentEffect(effect_type, helper)
+
+
+class WeatherBandTests(TestCase):
+    """WB-01 — WB-04, WB-08 — WB-10. One number a day, for the whole game."""
+
+    def test_wb_01_the_band_is_one_to_ten(self):
+        """WB-01"""
+        from evennia_calendar.config import Season
+
+        for day in range(1, 100):
+            for season in Season:
+                with self.subTest(day=day, season=season):
+                    band = weather_band(day, season)
+                    self.assertIsInstance(band, int)
+                    # Whatever the season, it names a slot a terrain has.
+                    self.assertIn(band, range(1, 11))
+
+    def test_wb_02_the_same_day_and_seed_always_give_the_same_band(self):
+        """WB-02"""
+        from evennia_calendar.config import Season
+
+        # Derived rather than rolled, so nothing has to be stored and no two
+        # processes have to agree on anything.
+        self.assertEqual(
+            weather_band(4218, Season.SUMMER, "fcm"),
+            weather_band(4218, Season.SUMMER, "fcm"),
+        )
+
+    def test_wb_03_consecutive_days_do_not_walk_in_step(self):
+        """WB-03"""
+        from evennia_calendar.config import Season
+
+        run = [weather_band(day, Season.SPRING) for day in range(1, 61)]
+
+        # Every band turns up: a sawtooth would too, so also check it is not
+        # ascending in step, which is what hash() on an int would give.
+        self.assertEqual(set(run), set(range(3, 9)))
+        self.assertNotEqual(run, [((day - 1) % 6) + 3 for day in range(1, 61)])
+
+    def test_wb_04_a_different_seed_gives_a_different_band(self):
+        """WB-04"""
+        from evennia_calendar.config import Season
+
+        # Not for every day — two seeds agree one day in six by chance — so
+        # this asks across a run.
+        one = [weather_band(day, Season.SPRING, "fcm") for day in range(1, 40)]
+        other = [
+            weather_band(day, Season.SPRING, "another-game") for day in range(1, 40)
+        ]
+
+        self.assertNotEqual(one, other)
+
+    def test_wb_08_winter_shifts_the_band_down(self):
+        """WB-08"""
+        from evennia_calendar.config import Season
+
+        run = [weather_band(day, Season.WINTER) for day in range(1, 61)]
+
+        self.assertEqual(set(run), set(range(1, 7)))
+
+    def test_wb_09_summer_shifts_the_band_up(self):
+        """WB-09"""
+        from evennia_calendar.config import Season
+
+        run = [weather_band(day, Season.SUMMER) for day in range(1, 61)]
+
+        self.assertEqual(set(run), set(range(5, 11)))
+
+    def test_wb_10_spring_and_autumn_do_not_shift_the_band(self):
+        """WB-10"""
+        from evennia_calendar.config import Season
+
+        spring = [weather_band(day, Season.SPRING) for day in range(1, 61)]
+        autumn = [weather_band(day, Season.AUTUMN) for day in range(1, 61)]
+
+        self.assertEqual(set(spring), set(range(3, 9)))
+        # The same as each other, not merely in the same range — which is what
+        # would break if the two were ever given different shifts.
+        self.assertEqual(spring, autumn)
+
+
+class CurrentWeatherBandTests(TestCase):
+    """WB-05 — WB-07. Today's band, held between rollovers."""
+
+    def setUp(self):
+        from evennia_environment import weather
+
+        weather._held_band = None
+        weather._held_day = None
+
+    tearDown = setUp
+
+    def test_wb_05_a_read_with_nothing_held_computes_it(self):
+        """WB-05"""
+        # The lazy trigger: what answers between a restart and the next
+        # rollover, when no signal has fired yet.
+        self.assertIn(current_weather_band(), range(3, 9))
+
+    def test_wb_06_a_second_read_does_not_recompute(self):
+        """WB-06"""
+        from evennia_environment import weather
+
+        current_weather_band()
+
+        with mock.patch.object(
+            weather, "weather_band", side_effect=AssertionError("recomputed")
+        ):
+            current_weather_band()
+
+    def test_wb_07_day_changed_refreshes_what_is_held(self):
+        """WB-07"""
+        from evennia_calendar.signals import day_changed
+
+        from evennia_environment import weather
+
+        current_weather_band()
+        weather._held_band = 99
+
+        day_changed.send(sender=None, previous=None, current=None)
+
+        self.assertIn(weather._held_band, range(3, 9))
+        self.assertNotEqual(weather._held_band, 99)
 
 
 MOVEMENT_COST = EnvironmentEffectType(
@@ -1031,6 +1166,195 @@ class ResolveReturnTypeTests(TestCase):
         self.assertIn("blizzard", str(caught.exception))
 
 
+class ConfigTests(TestCase):
+    """CF-01 — CF-09. The setting, and the boot check that refuses a bad one.
+
+    Every case swaps the setting, so each clears the accessor's cache first —
+    it is resolved once for the life of a process and a test is the one thing
+    that changes a setting mid-flight.
+    """
+
+    def setUp(self):
+        terrain_enum.cache_clear()
+        terrain_types.cache_clear()
+
+    tearDown = setUp
+
+    def _refusal(self, value, setting=SETTING_TERRAIN_ENUM):
+        """Return the message from checking with ``setting`` at ``value``."""
+        with override_settings(**{setting: value}):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        return str(caught.exception)
+
+    def test_cf_01_refuses_an_absent_setting(self):
+        """CF-01"""
+        message = self._refusal(None)
+
+        self.assertIn(SETTING_TERRAIN_ENUM, message)
+        # The refusal shows what a value looks like, so a consumer reading it
+        # does not have to find the documentation to act on it.
+        self.assertIn("world.environment.Terrain", message)
+
+    def test_cf_02_refuses_a_setting_that_is_empty_or_not_a_string(self):
+        """CF-02"""
+        for value in ("", 42, ["world.environment.Terrain"]):
+            with self.subTest(value=value):
+                self.assertIn(SETTING_TERRAIN_ENUM, self._refusal(value))
+
+    def test_cf_03_refuses_a_path_that_cannot_be_imported(self):
+        """CF-03"""
+        with override_settings(
+            **{SETTING_TERRAIN_ENUM: "tests.nothing_here.Terrain"}
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        # Chained, not swallowed: the consumer gets the setting that is wrong
+        # and the import error underneath it.
+        self.assertIsNotNone(caught.exception.__cause__)
+        self.assertIn("tests.nothing_here.Terrain", str(caught.exception))
+
+    def test_cf_04_refuses_a_path_naming_something_that_is_not_an_enum(self):
+        """CF-04"""
+        message = self._refusal("tests.terrain_enums.NOT_AN_ENUM")
+
+        self.assertIn("Enum", message)
+
+    def test_cf_05_accepts_an_enum_with_no_members(self):
+        """CF-05"""
+        # Nothing declared yet: an empty enum and no terrain types together.
+        # An empty enum beside a populated table would make every terrain
+        # unreachable, which CF-12 refuses.
+        with override_settings(
+            **{
+                SETTING_TERRAIN_ENUM: "tests.terrain_enums.EmptyTerrain",
+                SETTING_TERRAIN_TYPES: "tests.terrain_tables.NO_TERRAINS",
+            }
+        ):
+            check_settings()
+
+    def test_cf_06_refuses_duplicate_values(self):
+        """CF-06"""
+        message = self._refusal("tests.terrain_enums.AliasedTerrain")
+
+        # Named, because Python has already folded JUNGLE into FOREST by the
+        # time anything looks at the members.
+        self.assertIn("JUNGLE", message)
+
+    def test_cf_07_refuses_values_that_are_not_strings(self):
+        """CF-07"""
+        message = self._refusal("tests.terrain_enums.NumberedTerrain")
+
+        self.assertIn("SWAMP", message)
+        self.assertIn("MOUNTAINS", message)
+
+    def test_cf_08_reports_two_independent_problems_together(self):
+        """CF-08"""
+        message = self._refusal("tests.terrain_enums.DoublyWrongTerrain")
+
+        self.assertEqual(message.count(PROBLEM_PREFIX), 2)
+        self.assertIn("JUNGLE", message)
+        self.assertIn("SWAMP", message)
+
+    def test_cf_10_refuses_an_absent_terrain_types_setting(self):
+        """CF-10"""
+        message = self._refusal(None, setting=SETTING_TERRAIN_TYPES)
+
+        self.assertIn(SETTING_TERRAIN_TYPES, message)
+        self.assertIn("world.environment.TERRAINS", message)
+
+    def test_cf_11_refuses_terrain_types_that_are_not_terrain_types(self):
+        """CF-11"""
+        message = self._refusal(
+            "tests.terrain_tables.NOT_TERRAIN_TYPES", setting=SETTING_TERRAIN_TYPES
+        )
+
+        self.assertIn("TerrainType", message)
+
+    def test_cf_12_refuses_a_terrain_type_no_enum_member_names(self):
+        """CF-12"""
+        message = self._refusal(
+            "tests.terrain_tables.UNREACHABLE_TERRAINS",
+            setting=SETTING_TERRAIN_TYPES,
+        )
+
+        # Unreachable: a room can only ever store a member's value, so nothing
+        # could arrive at this terrain.
+        self.assertIn("tundra", message)
+
+    def test_cf_13_accepts_an_enum_member_with_no_terrain_type(self):
+        """CF-13"""
+        with override_settings(
+            **{SETTING_TERRAIN_TYPES: "tests.terrain_tables.PARTIAL_TERRAINS"}
+        ):
+            check_settings()
+
+    def test_cf_14_reports_a_problem_in_each_setting_together(self):
+        """CF-14"""
+        with override_settings(
+            **{
+                SETTING_TERRAIN_ENUM: "tests.terrain_enums.NumberedTerrain",
+                SETTING_TERRAIN_TYPES: None,
+            }
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+
+        message = str(caught.exception)
+        self.assertEqual(message.count(PROBLEM_PREFIX), 2)
+        self.assertIn(SETTING_TERRAIN_TYPES, message)
+
+    def test_cf_09_a_valid_setting_resolves_to_the_enum(self):
+        """CF-09"""
+        from tests.terrain_enums import Terrain
+
+        check_settings()
+
+        self.assertIs(terrain_enum(), Terrain)
+
+
+class RoomTerrainDescriptionTests(DjangoTestCase):
+    """RM-03, RM-04, RM-08. What a room says about its terrain.
+
+    The room stores a member; the description lives on the TerrainType whose
+    key matches that member's value. These need a real object, so the fixtures
+    are imported inside each case.
+    """
+
+    def _room(self):
+        from evennia import create_object
+
+        from tests.game_typeclasses import TerrainRoom
+
+        return create_object(TerrainRoom, key="room", nohome=True)
+
+    def test_rm_03_returns_the_terrains_description(self):
+        """RM-03"""
+        from tests.terrain_enums import Terrain
+        from tests.terrain_tables import SWAMP
+
+        room = self._room()
+        room.terrain = Terrain.SWAMP
+
+        self.assertEqual(room.get_terrain_description(), SWAMP.description)
+
+    def test_rm_04_a_room_with_no_terrain_has_no_description(self):
+        """RM-04"""
+        self.assertIsNone(self._room().get_terrain_description())
+
+    def test_rm_08_a_terrain_with_no_description_returns_none(self):
+        """RM-08"""
+        from tests.terrain_enums import Terrain
+
+        room = self._room()
+        # MOUNTAINS declares no description, which is legal.
+        room.terrain = Terrain.MOUNTAINS
+
+        self.assertIsNone(room.get_terrain_description())
+
+
 class TerrainPropertyTests(DjangoTestCase):
     """TP-01 — TP-14. A room's terrain: enum in, string stored, enum out.
 
@@ -1050,15 +1374,6 @@ class TerrainPropertyTests(DjangoTestCase):
     def test_tp_01_an_unassigned_room_has_no_terrain(self):
         """TP-01"""
         self.assertIsNone(self._room().terrain)
-
-    def test_tp_02_refuses_a_declaration_that_is_not_an_enum(self):
-        """TP-02"""
-        from evennia_environment.room import TerrainProperty
-
-        for not_an_enum in ("Terrain", 42, object()):
-            with self.subTest(terrain_enum=not_an_enum):
-                with self.assertRaises(ValueError):
-                    TerrainProperty(not_an_enum)
 
     def test_tp_03_accepts_a_member_and_reads_it_back(self):
         """TP-03"""

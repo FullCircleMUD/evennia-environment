@@ -13,40 +13,25 @@ be queried on; the member is what a consumer's code wants in hand.
 See docs/test-plan.md § TP.
 """
 
-from enum import Enum
-
 # Evennia, because AttributeProperty is Evennia's — a descriptor over its
 # attribute handler, and the mechanism this library validates through. There is
 # no engine-free equivalent to import instead.
 from evennia.typeclasses.attributes import AttributeProperty
 
+from evennia_environment.config import terrain_enum, terrain_types
+
 
 class TerrainProperty(AttributeProperty):
     """A room's terrain: an enum member in, a string stored, the member back.
 
-    Declared with the consumer's terrain enum, which is what lets it tell
-    ``Terrain.SWAMP`` from another enum's member and resolve ``"swamp"`` to the
-    member it names. Write-once: a room is given its terrain when it is built
-    and does not change it in play.
+    The enum comes from ``ENVIRONMENT_TERRAIN_ENUM`` through
+    ``config.terrain_enum()``, resolved once at boot — which is what lets the
+    property take no arguments and the mixin carry it. Write-once: a room is
+    given its terrain when it is built and does not change it in play.
     """
 
-    def __init__(self, terrain_enum, **kwargs):
-        """Hold the enum every assignment is checked against.
-
-        Raises a ``ValueError`` rather than an ``AttributeError``: this runs in
-        the consumer's class body, so it is a declaration being wrong rather
-        than a value arriving, and it matches every other declaration in this
-        library.
-        """
-        if not (isinstance(terrain_enum, type) and issubclass(terrain_enum, Enum)):
-            raise ValueError(
-                f"TerrainProperty was declared with {terrain_enum!r}, which is "
-                f"a {type(terrain_enum).__name__} rather than an Enum class. "
-                f"Pass the enum naming your game's terrains."
-            )
-
-        self._terrain_enum = terrain_enum
-
+    def __init__(self, **kwargs):
+        """Declare the attribute. The enum is read when it is needed."""
         # strattr so the stored name lands in Evennia's string column and a
         # search for every swamp room is a query rather than a walk. It cannot
         # be turned on later: a value written without the flag is invisible to
@@ -84,7 +69,7 @@ class TerrainProperty(AttributeProperty):
         if value is None:
             return None
 
-        return self._terrain_enum(value)
+        return terrain_enum()(value)
 
     def _to_stored(self, value):
         """Return what ``value`` should be stored as, or refuse it.
@@ -96,20 +81,83 @@ class TerrainProperty(AttributeProperty):
         if value is None:
             return None
 
-        if isinstance(value, self._terrain_enum):
+        if isinstance(value, terrain_enum()):
             return value.value
 
         if isinstance(value, str):
             try:
-                return self._terrain_enum(value).value
+                return terrain_enum()(value).value
             except ValueError:
                 raise AttributeError(
                     f"{self._key} cannot be {value!r}: no terrain has that "
                     f"name. Declared are "
-                    f"{', '.join(repr(m.value) for m in self._terrain_enum)}."
+                    f"{', '.join(repr(m.value) for m in terrain_enum())}."
                 ) from None
 
         raise AttributeError(
             f"{self._key} cannot be {value!r}. It must be a member of "
-            f"{self._terrain_enum.__name__}, or the name of one as a string."
+            f"{terrain_enum().__name__}, or the name of one as a string."
         )
+
+
+class EnvironmentRoomMixin:
+    """What a room answers about its surroundings. A placeholder.
+
+    Mixed into a consumer's own room typeclass. It brings ``terrain`` with it —
+    the property reads the game's enum from the setting, so there is nothing
+    per-typeclass to declare.
+
+    ::
+
+        class Room(EnvironmentRoomMixin, DefaultRoom):
+            pass
+
+    Every method here is unimplemented. Two things are missing under them: the
+    route from the stored terrain to its ``TerrainType``, and which of the
+    terrain's ten weather slots is active. See docs/test-plan.md § RM.
+    """
+
+    terrain = TerrainProperty()
+
+    def get_environment_effect(self, effect_type, **kwargs):
+        """Return what ``effect_type`` answers in this room.
+
+        Args:
+            effect_type (EnvironmentEffectType): the key being asked about.
+            **kwargs: whatever this key requires, and anything else a helper
+                may want.
+
+        Returns:
+            The value, of the effect type's declared return type.
+        """
+        raise NotImplementedError
+
+    def get_terrain_description(self):
+        """Return this room's terrain's description, or ``None``.
+
+        ``None`` for a room with no terrain, and for a terrain that declares
+        no description — both are ordinary, so neither raises.
+        """
+        terrain = self.terrain_type
+        return None if terrain is None else terrain.description
+
+    @property
+    def terrain_type(self):
+        """Return the ``TerrainType`` this room's terrain names, or ``None``.
+
+        The room stores a member; the type carrying what that terrain does is
+        the one whose key is the member's value. Boot has already refused a
+        type no member names, so a member with no type is the only miss, and
+        it means a game still being written.
+        """
+        terrain = self.terrain
+        return None if terrain is None else terrain_types().get(terrain.value)
+
+    def get_weather_description(self, day=True):
+        """Return the active weather's description, or ``None``.
+
+        Args:
+            day (bool): the day weather when true, the night one when false.
+                A stand-in until the library works out the watch itself.
+        """
+        raise NotImplementedError

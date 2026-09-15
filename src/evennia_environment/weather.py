@@ -18,8 +18,11 @@ are the consumer's.
 See docs/test-plan.md § WT.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Optional
+
+from evennia_calendar.config import Season
 
 from evennia_environment.effects import one_effect_per_type
 
@@ -123,3 +126,92 @@ class WeatherType:
                     f"{type(value).__name__}. It is text the consumer renders, "
                     f"so it has to be a string, or None for none at all."
                 )
+
+
+#: How many bands the hash is spread across.
+BANDS = 6
+
+#: The unshifted band starts here, so the hash gives 3 to 8 rather than 1 to 6.
+#: That leaves two of a terrain's ten slots clear at each end for the season to
+#: shift the band into.
+BAND_FLOOR = 3
+
+#: What each season does to the band. Winter reaches slots 1 and 2 and nothing
+#: else does; summer reaches 9 and 10. The middle is reachable in any season,
+#: which is what spring and autumn get. Whether slot 1 holds the good weather
+#: or the bad is the consumer's — this hands over a number.
+SEASON_SHIFT = {
+    Season.WINTER: -2,
+    Season.SPRING: 0,
+    Season.AUTUMN: 0,
+    Season.SUMMER: 2,
+}
+
+#: Today's band and the day it was worked out for. Module state, rebuilt on
+#: the next rollover or the next read — nothing about a band depends on it
+#: surviving, and a reload restarts the process anyway.
+_held_band = None
+_held_day = None
+
+
+def weather_band(day, season, seed=""):
+    """Return the band for ``day`` in ``season``, one to ten.
+
+    Derived rather than rolled: the same day and seed always give the same
+    number, so nothing is stored and no two processes have to agree on
+    anything. Any day past or future can be asked for.
+
+    Args:
+        day (int): the day being asked about.
+        season (Season): the season it falls in. Required rather than
+            defaulted — a band without one is not meaningful, and a
+            ``GameDate`` carries both, so working one out costs a single call.
+        seed (str): the game's weather seed. Changing it rerolls a world's
+            entire weather history.
+
+    Returns:
+        int: the band, 1 to 10.
+    """
+    # hashlib rather than hash(): the builtin is randomised per process for
+    # strings, so two processes would disagree about the weather, and it is the
+    # identity for small ints, so hash(day) % 6 is a metronome rather than
+    # weather. Eight bytes is a machine word and plenty of mixing.
+    digest = hashlib.sha256(f"{seed}:{day}".encode()).digest()
+    return (
+        int.from_bytes(digest[:8], "big") % BANDS
+        + BAND_FLOOR
+        + SEASON_SHIFT[season]
+    )
+
+
+def current_weather_band():
+    """Return today's band, held between rollovers.
+
+    Computed by ``day_changed`` when the clock is running, and on the first
+    read when nothing is held — which is what answers between a restart and
+    the next rollover.
+    """
+    if _held_band is None:
+        refresh_weather_band()
+
+    return _held_band
+
+
+def refresh_weather_band(sender=None, **kwargs):
+    """Recompute and hold today's band. Connected to ``day_changed``.
+
+    One calculation, two triggers: the signal when the clock is running, and a
+    read that finds nothing held. Asking the calendar what day it is costs
+    seven times what hashing it does, so the saving is in not asking on every
+    read rather than in caching the hash.
+    """
+    global _held_band, _held_day
+
+    from evennia_calendar import game_date
+
+    from evennia_environment.config import weather_seed
+
+    # One call: the date carries the day and the season both.
+    date = game_date()
+    _held_day = date.day_of_year
+    _held_band = weather_band(date.day_of_year, date.season, weather_seed())

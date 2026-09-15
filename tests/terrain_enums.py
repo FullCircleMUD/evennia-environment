@@ -26,3 +26,41 @@ class Season(Enum):
     """
 
     WINTER = "winter"
+
+
+class AliasedTerrain(Enum):
+    """Two members sharing a value, which Python folds into one. CF-06.
+
+    ``JUNGLE`` becomes a second name for ``FOREST`` and the game is a terrain
+    short, with nothing raised.
+    """
+
+    FOREST = "forest"
+    JUNGLE = "forest"
+
+
+class NumberedTerrain(Enum):
+    """Values that are not strings. CF-07."""
+
+    SWAMP = 1
+    MOUNTAINS = 2
+
+
+class DoublyWrongTerrain(Enum):
+    """A duplicate value and a non-string value at once. CF-08."""
+
+    FOREST = "forest"
+    JUNGLE = "forest"
+    SWAMP = 3
+
+
+class EmptyTerrain(Enum):
+    """No members, which is a correct reading rather than a mistake. CF-05."""
+
+
+NOT_AN_ENUM = "this names no terrains"
+
+
+#: Declared in a module that imports nothing but ``enum``, so the terrain types
+#: themselves live beside the suite's other fixtures rather than here. See
+#: tests/terrain_tables.py.
