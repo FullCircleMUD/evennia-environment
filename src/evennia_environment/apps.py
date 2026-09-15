@@ -23,7 +23,7 @@ class EnvironmentConfig(AppConfig):
 
         from evennia_environment.config import check_settings
         from evennia_environment.weather import (
-            refresh_is_dark,
+            refresh_is_night,
             refresh_weather_band,
         )
 
@@ -33,4 +33,4 @@ class EnvironmentConfig(AppConfig):
         # runs wherever the app starts — which is once per process, and again
         # after a reload, since a reload restarts the process.
         day_changed.connect(refresh_weather_band, dispatch_uid="environment_band")
-        phase_changed.connect(refresh_is_dark, dispatch_uid="environment_dark")
+        phase_changed.connect(refresh_is_night, dispatch_uid="environment_night")

@@ -39,7 +39,7 @@ re-creates. That is settled by how a room carries its terrain, which is open —
 ## evennia-calendar
 
 **Hard dependency, at runtime and not only on paper.** The day number is what the weather band is
-derived from, `season` shifts that band, and `phase` decides whether it is dark. The library connects
+derived from, `season` shifts that band, and `phase` decides whether it is night. The library connects
 to `day_changed` and `phase_changed` in its own `ready()` rather than running a clock, and holds both
 answers between signals so nothing asks the calendar on a read.
 

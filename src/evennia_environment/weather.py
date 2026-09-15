@@ -62,7 +62,7 @@ class WeatherSlot:
                 f"WeatherSlot for {self.day.key!r} was given {self.night!r} as "
                 f"its night weather, which is a {type(self.night).__name__} "
                 f"rather than a WeatherType. Leave it out for a slot that does "
-                f"not change after dark."
+                f"not change at night."
             )
 
 
@@ -208,40 +208,40 @@ def refresh_weather_band(sender=None, **kwargs):
     _held_band = weather_band(date.day_of_year, date.season, weather_seed())
 
 
-#: Whether the current watch is dark, and the watch it was worked out for.
+#: Whether the current watch is night, and the watch it was worked out for.
 #: Module state, rebuilt on the next watch or the next read.
-_held_dark = None
+_held_night = None
 _held_phase = None
 
 
-def is_dark():
-    """Return whether the current watch is one the consumer declared dark.
+def is_night():
+    """Return whether the current watch is one the consumer declared night.
 
     Held between watches: ``phase_changed`` refreshes it, and a read computes
     it when nothing is held — which is what answers between a restart and the
     next watch.
     """
-    if _held_dark is None:
-        refresh_is_dark()
+    if _held_night is None:
+        refresh_is_night()
 
-    return _held_dark
+    return _held_night
 
 
-def refresh_is_dark(sender=None, **kwargs):
-    """Recompute and hold whether it is dark. Connected to ``phase_changed``.
+def refresh_is_night(sender=None, **kwargs):
+    """Recompute and hold whether it is night. Connected to ``phase_changed``.
 
     One calculation, two triggers, as the band has: the signal when the clock
     is running, and a read that finds nothing held.
     """
-    global _held_dark, _held_phase
+    global _held_night, _held_phase
 
-    from evennia_environment.config import dark_watches
+    from evennia_environment.config import night_watches
 
     _held_phase = game_date().phase
-    _held_dark = _held_phase in dark_watches()
+    _held_night = _held_phase in night_watches()
 
 
-def current_weather(terrain_type, dark=None):
+def current_weather(terrain_type, night=None):
     """Return the weather in force for ``terrain_type``.
 
     The band names the slot — both run 1 to 10 — and the slot answers with its
@@ -249,7 +249,8 @@ def current_weather(terrain_type, dark=None):
 
     Args:
         terrain_type (TerrainType): the terrain whose slots to read.
-        dark (bool): forces night when true and day when false. Worked out
+        night (bool): forces the night weather when true and the day one
+            when false. Worked out
             from the current watch when not given.
 
     Returns:
@@ -259,9 +260,9 @@ def current_weather(terrain_type, dark=None):
     # are indexed by it directly and there is nothing to map.
     slot = terrain_type.weather_slots[current_weather_band() - 1]
 
-    if dark is None:
-        dark = is_dark()
+    if night is None:
+        night = is_night()
 
     # Both are always populated: WeatherSlot fills night from day when none
     # was declared, so this never has to test for absence.
-    return slot.night if dark else slot.day
+    return slot.night if night else slot.day

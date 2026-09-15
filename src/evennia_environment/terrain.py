@@ -103,14 +103,14 @@ class TerrainType:
 
             # A WeatherSlot and nothing else, a WeatherType included. One
             # shape, so a consumer never chooses between two classes on a
-            # condition — a slot that does not change after dark is
+            # condition — a slot that does not change at night is
             # WeatherSlot(BLIZZARD), and the slot fills its own night.
             if not isinstance(slot, WeatherSlot):
                 refuse(
                     f"Terrain {self.key!r} declares {slot!r} in weather slot "
                     f"{number}, which is a {type(slot).__name__}. Every slot "
                     f"holds a WeatherSlot — wrap a weather that does not change "
-                    f"after dark, as WeatherSlot(blizzard)."
+                    f"at night, as WeatherSlot(blizzard)."
                 )
 
             ordered.append(slot)

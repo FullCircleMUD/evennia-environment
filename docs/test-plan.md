@@ -28,7 +28,7 @@ designed is in [Open decisions](#open-decisions) below.
 | `DR` | `refuse()` — the one route every declaration refusal takes, and what it logs |
 | `CF` | The setting, and the boot check that refuses a bad one |
 | `WB` | The weather band — one number a day, for the whole game |
-| `DN` | Whether it is dark, held between watches |
+| `DN` | Whether it is night, held between watches |
 | `RM` | `EnvironmentRoomMixin` — what a room answers about its surroundings |
 
 ## Fixtures
@@ -110,7 +110,7 @@ calculation on every terrain that wanted it. `Constant(1.0)` is the static case.
 |---|---|---|
 | EF-12 | Every refusal is a `ValueError` naming the key, so the consumer can find the declaration. One class for all of them — each one means "you declared this wrong", and one class is easier to catch | `test_ef_12_every_refusal_is_a_value_error_naming_the_key` |
 
-## EE — `EnvironmentEffect(effect_type, helper)`
+## EE — `EnvironmentEffect(effect_type, helper, night)`
 
 A frozen dataclass pairing a declared effect type with the helper that answers for it. This is what
 terrain and weather carry: `EnvironmentEffectType` says `move_cost` is a float defaulting to
@@ -118,15 +118,33 @@ terrain and weather carry: `EnvironmentEffectType` says `move_cost` is a float d
 
 ```python
 EnvironmentEffect(MOVE_COST, Constant(2.0))
+EnvironmentEffect(MOVE_COST, Constant(2.0), night=Constant(3.0))
 ```
 
 **Declared means changed.** A terrain or weather only declares the keys it wants to be different from
 the default. Silence is not an omission to be filled in — nothing runs, and the default's answer
 stands.
 
+**A contribution may differ at night.** `night` is a second helper for the same key, in force
+during the night watches. It is optional, and filled with the day helper when it is not given — the
+same fill `WeatherSlot` does, for the same reason: both halves are always populated, so nothing
+downstream tests for absence, and "does this vary at night" is `effect.night is effect.helper` with
+no flag to carry.
+
+**The pair sits inside the effect, not around the collection.** One key is still one effect, so
+"at most one contribution per key per contributor" is untouched and the resolution chain stays two
+links. A contributor that does not vary declares what it declared before, so `night` costs an
+existing declaration nothing.
+
+**Which half is in force is decided elsewhere.** `helper_for(night)` is handed the answer and
+returns one; nothing here reads a clock. Its parameter is named for the clock, not for darkness —
+the same split the night watches make in § CF. `[TBD — needs discussion: where `night` reaches
+`resolve()` from. `resolve()` is pure today and the room mixin already works it out for weather.
+Settled in the integration pass, not here.]`
+
 **The helper is checked the same way the type's default is** — callable, takes the running value
 positionally, takes `**kwargs`. Both go through one check, so a helper that would crash at the first
-call is refused at the line that declared it.
+call is refused at the line that declared it. A declared `night` gets the same check.
 
 **Nothing here looks at what the helper returns.** `return_type` is checked against an answer on the
 call path, where it applies to every contribution rather than only to the one declared here.
@@ -139,6 +157,7 @@ call path, where it applies to every contribution rather than only to the one de
 |---|---|---|
 | EE-01 | A valid effect carries its type and helper unchanged, and the type is the object that was passed | `test_ee_01_carries_its_type_and_helper` |
 | EE-02 | The instance is frozen — assigning to a field after construction raises | `test_ee_02_is_frozen` |
+| EE-11 | A declared night helper is carried unchanged, and is the object that was passed | `test_ee_11_carries_a_declared_night_helper` |
 
 ### The effect type
 
@@ -151,6 +170,20 @@ call path, where it applies to every contribution rather than only to the one de
 | ID | Case | Test function |
 |---|---|---|
 | EE-09 | A helper that cannot be called as one is refused — not callable at all, or callable but unable to take the running value or the caller's kwargs. The rule itself is pinned by EF-15 to EF-17 against the default; this proves the same check is applied here | `test_ee_09_refuses_a_helper_that_cannot_be_called_as_one` |
+
+### The night helper
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-10 | A night helper not given is filled with the day helper, and is the same object — so `night is helper` is what answers "does this vary at night" | `test_ee_10_night_defaults_to_the_day_helper` |
+| EE-12 | A declared night helper that cannot be called as one is refused, by the same check EE-09 pins against the day helper, and the refusal says it was the night one — otherwise a declaration with two helpers gives the consumer two candidates | `test_ee_12_refuses_a_night_helper_that_cannot_be_called_as_one` |
+
+### The helper in force
+
+| ID | Case | Test function |
+|---|---|---|
+| EE-13 | `helper_for(night=True)` returns the night helper and `helper_for(night=False)` the day one. Called by keyword, because the parameter is part of a public method's contract and its name is what a consumer reads | `test_ee_13_helper_for_returns_the_half_in_force` |
+| EE-14 | On an effect declaring no night, `helper_for` answers the same helper either way — the common case, and what makes the fill worth doing | `test_ee_14_an_effect_with_no_night_answers_the_same_either_way` |
 
 ### The refusal
 
@@ -308,7 +341,7 @@ they are for an effect key — the key is a mapping handle, and a player sees `d
 ## WS — `WeatherSlot(day, night)`
 
 One of a terrain's ten slots. It holds the weather that occurs there, and optionally a different one
-for the dark watches.
+for the night watches.
 
 ```python
 WeatherSlot(SCORCHING, night=FREEZING_CLEAR)   # a desert
@@ -355,7 +388,7 @@ a cavern, an interior — declares ten of whatever its still air is called. Coun
 is ten or fewer.
 
 **Every slot value is a `WeatherSlot`. A `WeatherType` is not assignable to a terrain.** One shape,
-no condition to explain: a slot that does not change after dark is `WeatherSlot(BLIZZARD)`, and
+no condition to explain: a slot that does not change at night is `WeatherSlot(BLIZZARD)`, and
 `WeatherSlot` fills its night from its day.
 
 **Declared as a dict, stored as a tuple in slot order** — the same in-one-form, out-another as
@@ -499,7 +532,7 @@ it unvalidated. That is Evennia's behaviour and cannot be closed from here.
 | TP-15 | The refusal names the room, so a build applying content to hundreds of them says which one failed. `"terrain cannot be 'swmap'"` with no room is the bad value and no way to find it | `test_tp_15_the_refusal_names_the_room` |
 | TP-16 | An unknown terrain name refuses without the enum's own `ValueError` chained underneath — the consumer's mistake is the name, not the lookup that went looking for it | `test_tp_16_an_unknown_name_does_not_chain_the_enums_own_error` |
 
-## RS — `resolve(effect_type, terrain_type, weather_type, **kwargs)`
+## RS — `resolve(effect_type, terrain_type, weather_type, night, **kwargs)`
 
 What a key answers. Given an effect type and whichever contributors apply, it runs them in order and
 returns the value.
@@ -652,7 +685,7 @@ The consumer's terrain enum reaches the library as a setting naming it:
 ```python
 ENVIRONMENT_TERRAIN_ENUM = "world.environment.Terrain"
 ENVIRONMENT_TERRAIN_TYPES = "world.environment.TERRAINS"
-ENVIRONMENT_DARK_WATCHES = (6, 1)
+ENVIRONMENT_NIGHT_WATCHES = (6, 1)
 ```
 
 **Two settings, one file.** The enum names the terrains a game has; `TERRAINS` is the collection of
@@ -699,22 +732,28 @@ into the log without a delivery case per reason.
 | CF-06 | Duplicate values are refused, naming the members Python folded. `JUNGLE = "forest"` silently becomes a second name for `FOREST`, leaving the game a terrain short with nothing raised | `test_cf_06_refuses_duplicate_values` |
 | CF-07 | Values that are not strings are refused, naming them — a terrain's value is what a room stores and what YAML writes | `test_cf_07_refuses_values_that_are_not_strings` |
 
-### The dark watches
+### The night watches
 
-Which of the calendar's six watches are dark. Numbers rather than names, because `PHASE_NAMES` are
-documented as placeholders a game is expected to replace, so a name-based setting breaks when
-someone renames them.
+Which of the calendar's six watches the sun is down for. Numbers rather than names, because
+`PHASE_NAMES` are documented as placeholders a game is expected to replace, so a name-based setting
+breaks when someone renames them.
 
-There is no safe default — the calendar deliberately refuses to say which watches are dark, so the
+**Night, not darkness.** This setting answers a question about the clock, and the answer is the same
+everywhere in the game. Whether a *place* is dark is a different question — a cavern is dark at noon
+— and terrain and weather answer that one, as an effect key the consumer declares. Naming this
+setting for darkness put both under one word, and a consumer reaching for it to light a room would
+have got the wrong answer for every cave.
+
+There is no safe default — the calendar deliberately refuses to say which watches are night, so the
 library cannot invent one either. Declaring an empty tuple is a game with no night, which is a
 correct reading; not declaring at all is not.
 
 | ID | Case | Test function |
 |---|---|---|
-| CF-15 | The dark-watches setting absent is refused | `test_cf_15_refuses_absent_dark_watches` |
-| CF-16 | A setting that is not a collection of watch numbers is refused | `test_cf_16_refuses_dark_watches_that_are_not_watch_numbers` |
+| CF-15 | The night-watches setting absent is refused | `test_cf_15_refuses_absent_night_watches` |
+| CF-16 | A setting that is not a collection of watch numbers is refused | `test_cf_16_refuses_night_watches_that_are_not_watch_numbers` |
 | CF-17 | A watch number outside 1 to 6 is refused, naming it — the calendar has six | `test_cf_17_refuses_a_watch_outside_one_to_six` |
-| CF-18 | An empty tuple is accepted: a game with no night | `test_cf_18_accepts_no_dark_watches_at_all` |
+| CF-18 | An empty tuple is accepted: a game with no night | `test_cf_18_accepts_no_night_watches_at_all` |
 
 ### The terrain types
 
@@ -845,7 +884,7 @@ The band is the slot number: both run 1 to 10, so a terrain's slots are indexed 
 | ID | Case | Test function |
 |---|---|---|
 | WB-11 | `current_weather` returns the weather in the slot the band names | `test_wb_11_the_band_names_the_slot` |
-| WB-12 | It returns the slot's night weather when it is dark and its day weather when it is not — which differ only where the slot declared a night | `test_wb_12_dark_reads_the_slots_night_weather` |
+| WB-12 | It returns the slot's night weather at night and its day weather by day — which differ only where the slot declared a night | `test_wb_12_night_reads_the_slots_night_weather` |
 
 ### Today's band
 
@@ -855,18 +894,22 @@ The band is the slot number: both run 1 to 10, so a terrain's slots are indexed 
 | WB-06 | A second read returns what is held without recomputing | `test_wb_06_a_second_read_does_not_recompute` |
 | WB-07 | `day_changed` refreshes what is held, so a rollover takes effect without anything asking the calendar | `test_wb_07_day_changed_refreshes_what_is_held` |
 
-## DN — whether it is dark
+## DN — whether it is night
+
+**Night, not darkness.** `is_night()` reads the clock and answers the same everywhere in the game.
+Whether a *place* is dark is terrain and weather together, asked as an effect key — see § CF's night
+watches.
 
 Held between watches, the same shape as the band: `phase_changed` refreshes it, and a read computes
 it when nothing is held — which is what answers between a restart and the next watch.
 
-Nothing is stored in the database. Changing `ENVIRONMENT_DARK_WATCHES` and restarting is the whole
+Nothing is stored in the database. Changing `ENVIRONMENT_NIGHT_WATCHES` and restarting is the whole
 operation; there is no history to fix up.
 
 | ID | Case | Test function |
 |---|---|---|
-| DN-01 | A watch the setting names is dark | `test_dn_01_a_declared_watch_is_dark` |
-| DN-02 | A watch it does not name is light | `test_dn_02_a_watch_not_declared_is_light` |
+| DN-01 | A watch the setting names is night | `test_dn_01_a_declared_watch_is_night` |
+| DN-02 | A watch it does not name is day | `test_dn_02_a_watch_not_declared_is_day` |
 | DN-03 | A read with nothing held works it out from the current watch | `test_dn_03_a_read_with_nothing_held_works_it_out` |
 | DN-04 | A second read returns what is held without asking the calendar again | `test_dn_04_a_second_read_does_not_ask_the_calendar_again` |
 | DN-05 | `phase_changed` refreshes what is held | `test_dn_05_phase_changed_refreshes_what_is_held` |
@@ -932,7 +975,7 @@ the design conversation and left open, not a gap to be filled by whoever reads t
 - `[TBD — needs discussion: how the active slot is chosen for a day. The ten slots are the candidate
   table and the draw is once per day; the function from day number and terrain to a slot is not
   designed. Note that weather keyed on `day_of_year` turns over at midnight, in the middle of the
-  dark watches — a weather-day offset from the calendar day is what puts the roll at dawn, and it
+  night watches — a weather-day offset from the calendar day is what puts the roll at dawn, and it
   also decides whether a slot's night weather is the night after its day or the one before.]`
 - `[TBD — needs discussion: how the dark-watches declaration is shaped and where it sits — a setting,
   or part of the consumer's declaration module alongside the terrains and effect keys.]`

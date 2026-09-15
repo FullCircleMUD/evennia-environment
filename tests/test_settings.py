@@ -52,7 +52,7 @@ DEFAULT_HOME = None
 # absent or wrong overrides it.
 ENVIRONMENT_TERRAIN_ENUM = "tests.terrain_enums.Terrain"
 ENVIRONMENT_TERRAIN_TYPES = "tests.terrain_tables.TERRAINS"
-ENVIRONMENT_DARK_WATCHES = (6, 1)
+ENVIRONMENT_NIGHT_WATCHES = (6, 1)
 
 # Required Django bits
 SECRET_KEY = "test-only-secret"

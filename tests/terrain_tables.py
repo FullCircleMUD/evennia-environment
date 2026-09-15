@@ -43,7 +43,7 @@ SWAMP = TerrainType(
 #: slot of its own number rather than any slot.
 _NUMBERED = {n: WeatherSlot(WeatherType(key=f"band_{n}")) for n in range(1, 11)}
 
-#: Slot 4 alone differs after dark, so WB-12 proves the night is read rather
+#: Slot 4 alone differs at night, so WB-12 proves the night is read rather
 #: than the day happening to match.
 _DAY = WeatherType(
     key="scorching",

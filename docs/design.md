@@ -101,7 +101,7 @@ disagree, and the identity for small ints, so `hash(day) % 6` is a metronome.
 
 ## Held between signals, not polled
 
-The band and whether it is dark are both held in module state. `day_changed` and `phase_changed`
+The band and whether it is night are both held in module state. `day_changed` and `phase_changed`
 refresh them, and a read computes only when nothing is held — which is what answers between a restart
 and the next rollover.
 

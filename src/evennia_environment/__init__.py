@@ -42,7 +42,7 @@ from evennia_environment.weather import (
     WeatherType,
     current_weather,
     current_weather_band,
-    is_dark,
+    is_night,
     weather_band,
 )
 
@@ -62,7 +62,7 @@ __all__ = [
     "WeatherType",
     "current_weather",
     "current_weather_band",
-    "is_dark",
+    "is_night",
     "resolve",
     "weather_band",
 ]

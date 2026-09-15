@@ -197,9 +197,9 @@ class EnvironmentRoomMixin:
             return None
 
         # None leaves it to the watch; True and False override it.
-        dark = None if day is None else not day
+        night = None if day is None else not day
 
-        return _weather_in_force(terrain, dark=dark).description
+        return _weather_in_force(terrain, night=night).description
 
     @property
     def current_weather(self):

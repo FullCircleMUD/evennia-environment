@@ -40,7 +40,7 @@ See [the worked example](#a-worked-example) at the bottom for a full one.
 # settings.py
 ENVIRONMENT_TERRAIN_ENUM  = "world.environment.Terrain"
 ENVIRONMENT_TERRAIN_TYPES = "world.environment.TERRAINS"
-ENVIRONMENT_DARK_WATCHES  = (6, 1)
+ENVIRONMENT_NIGHT_WATCHES  = (6, 1)
 ```
 
 ## 5. Add the mixin to your rooms
@@ -102,12 +102,12 @@ desc = room.get_terrain_description()
 |---|---|---|
 | `ENVIRONMENT_TERRAIN_ENUM` | Dotted path to the `Enum` naming your terrains | The instance does not start |
 | `ENVIRONMENT_TERRAIN_TYPES` | Dotted path to your `TerrainType` objects | The instance does not start |
-| `ENVIRONMENT_DARK_WATCHES` | Which of the calendar's six watches are dark, as numbers | The instance does not start |
+| `ENVIRONMENT_NIGHT_WATCHES` | Which of the calendar's six watches the sun is down for, as numbers | The instance does not start |
 
 None has a safe default. There is no terrain list the library could invent, and the calendar
-deliberately declines to say which watches are dark.
+deliberately declines to say which watches are night.
 
-An empty terrain enum, no terrain types, or no dark watches are each accepted — those are a game
+An empty terrain enum, no terrain types, or no night watches are each accepted — those are a game
 being written, or one with no night. Not declaring the setting at all is not.
 
 ## Optional settings
@@ -259,5 +259,5 @@ Reading it back out of that:
   on the days it was hot.
 - **Slots 1 and 2 are reachable only in winter, 9 and 10 only in summer.** The mountains' blizzards
   are a winter event; the desert's worst heat is a summer one.
-- **`WeatherSlot` is always what a slot holds.** A weather that does not change after dark is
+- **`WeatherSlot` is always what a slot holds.** A weather that does not change at night is
   `WeatherSlot(CLEAR)`, and the slot fills its night from its day.

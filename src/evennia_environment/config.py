@@ -31,7 +31,7 @@ from evennia_calendar.config import Season
 SETTING_TERRAIN_ENUM = "ENVIRONMENT_TERRAIN_ENUM"
 SETTING_TERRAIN_TYPES = "ENVIRONMENT_TERRAIN_TYPES"
 SETTING_WEATHER_SEED = "ENVIRONMENT_WEATHER_SEED"
-SETTING_DARK_WATCHES = "ENVIRONMENT_DARK_WATCHES"
+SETTING_NIGHT_WATCHES = "ENVIRONMENT_NIGHT_WATCHES"
 
 #: What each collected problem is prefixed with in the refusal. One per line,
 #: so a consumer with two things wrong works through a list rather than a
@@ -101,7 +101,7 @@ def check_settings() -> None:
         _collect(causes, exc)
 
     try:
-        _check_dark_watches()
+        _check_night_watches()
     except ImproperlyConfigured as exc:
         problems.extend(str(exc).split(_JOIN))
 
@@ -260,24 +260,29 @@ def _check_terrain_types(terrains):
         )
 
 
-def _check_dark_watches():
-    """Refuse dark watches that are missing or not watch numbers.
+def _check_night_watches():
+    """Refuse night watches that are missing or not watch numbers.
+
+    Night, not darkness: this names the watches the sun is down for, which is
+    a fact about the clock and the same everywhere in the game. Whether a place
+    is dark is a different question — terrain and weather answer it, and a
+    consumer asks it as an effect key.
 
     The calendar deliberately refuses to say which of its six watches are
-    dark, so the library cannot invent a default either. An empty tuple is a
+    night, so the library cannot invent a default either. An empty tuple is a
     game with no night, which is a correct reading; not declaring is not.
     """
     from django.conf import settings
 
-    declared = getattr(settings, SETTING_DARK_WATCHES, None)
+    declared = getattr(settings, SETTING_NIGHT_WATCHES, None)
 
     # A string is iterable, so "6,1" would otherwise be walked as characters.
     if declared is None or isinstance(declared, str) or not isinstance(
         declared, (tuple, list, set, frozenset)
     ):
         raise ImproperlyConfigured(
-            f"{SETTING_DARK_WATCHES} is {declared!r}. Name the watches your "
-            f"game counts as dark, as numbers — the calendar has six, so "
+            f"{SETTING_NIGHT_WATCHES} is {declared!r}. Name the watches the "
+            f"sun is down for, as numbers — the calendar has six, so "
             f"e.g. {_WATCHES_EXAMPLE}. Declare an empty tuple for a game with "
             f"no night."
         )
@@ -290,7 +295,7 @@ def _check_dark_watches():
     )
     if out_of_range:
         raise ImproperlyConfigured(
-            f"{SETTING_DARK_WATCHES} names {', '.join(out_of_range)}, which "
+            f"{SETTING_NIGHT_WATCHES} names {', '.join(out_of_range)}, which "
             f"are not watches. The calendar's day is six, numbered 1 to 6."
         )
 
@@ -386,11 +391,11 @@ def weather_seed() -> str:
 
 
 @lru_cache(maxsize=1)
-def dark_watches() -> frozenset:
-    """Return the watches the consumer declared dark. Checked at boot.
+def night_watches() -> frozenset:
+    """Return the watches the consumer declared as night. Checked at boot.
 
-    A test that swaps the setting must call ``dark_watches.cache_clear()``.
+    A test that swaps the setting must call ``night_watches.cache_clear()``.
     """
     from django.conf import settings
 
-    return frozenset(getattr(settings, SETTING_DARK_WATCHES))
+    return frozenset(getattr(settings, SETTING_NIGHT_WATCHES))

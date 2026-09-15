@@ -175,11 +175,18 @@ class EnvironmentEffect:
     wants different from the default; silence leaves the default's answer
     standing.
 
+    **A contribution may differ at night.** ``night`` is a second helper for
+    the same key, in force during the night watches, and optional — a mountain
+    that costs more to cross at night declares one, and most contributions do
+    not. The pair sits inside the effect rather than around the collection, so
+    one key is still one effect and the resolution chain stays two links.
+
     See docs/test-plan.md § EE.
     """
 
     effect_type: EnvironmentEffectType
     helper: Callable
+    night: Optional[Callable] = None
 
     def __post_init__(self):
         """Refuse a declaration that cannot be used, naming the key.
@@ -187,7 +194,7 @@ class EnvironmentEffect:
         Every refusal is a ``ValueError``, as the type's are: one class for
         "you declared this wrong" is easier to catch than a type per mistake.
         """
-        # First, so the refusal below has a key to name.
+        # First, so the refusals below have a key to name.
         if not isinstance(self.effect_type, EnvironmentEffectType):
             refuse(
                 f"EnvironmentEffect was given {self.effect_type!r} as its "
@@ -200,12 +207,50 @@ class EnvironmentEffect:
         # would crash at the first call is refused at the line declaring it.
         # Nothing here looks at what it returns: return_type is checked against
         # an answer on the call path, where it covers every contribution.
+        #
         refusal = rejects_helper_arguments(self.helper)
         if refusal:
             refuse(
                 f"EnvironmentEffect for {self.effect_type.key!r} declares a "
                 f"helper that {refusal}"
             )
+
+        # Filled rather than left None, as WeatherSlot fills its night from its
+        # day: both halves are always populated, so nothing downstream tests for
+        # absence, and "does this vary at night" is `night is helper` with no
+        # flag to carry. object.__setattr__ because the dataclass is frozen.
+        if self.night is None:
+            object.__setattr__(self, "night", self.helper)
+            return
+
+        # Checked only when it was declared — a filled night is the day helper
+        # and has already been through the check above. The refusal says which
+        # of the two is wrong, because a declaration carrying two helpers
+        # otherwise leaves the consumer picking between them.
+        refusal = rejects_helper_arguments(self.night)
+        if refusal:
+            refuse(
+                f"EnvironmentEffect for {self.effect_type.key!r} declares a "
+                f"night helper that {refusal}"
+            )
+
+    def helper_for(self, night):
+        """Return the helper in force, given whether it is night.
+
+        Handed the answer rather than working it out: this module reads no
+        clock and imports no calendar, which is what keeps a declaration
+        testable without Evennia.
+
+        Args:
+            night (bool): whether the night watches are in force. Named for
+                the clock, not for darkness — whether a place is dark is a
+                different question, and an effect key answers that one.
+
+        Returns:
+            Callable: the helper. Both halves are always populated, so this
+            never answers ``None``.
+        """
+        return self.night if night else self.helper
 
 
 def one_effect_per_type(effects, declared_by):
