@@ -289,3 +289,8 @@ Reading it back out of that:
   its own thirst stops climbing once the sun is down. The mountains do neither to their weather and
   only cost more to cross.
 - **Neither is required.** Leave `night=` off and the day answer stands whatever the hour.
+- **`description` and `transition_in` may each be a mapping instead of a string.** For a game that
+  varies the message by who is receiving it — one line for someone who can see the blizzard, another
+  for someone who can only hear it. The keys are yours: the library stores the mapping, hands it back
+  whole, and never looks inside it. A weather's mapping replaces a terrain's exactly as a string does,
+  so nothing is merged and nothing inherits.

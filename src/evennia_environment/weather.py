@@ -3,7 +3,7 @@
 
 A weather is one entry in a game's spectrum — sunny with some clouds, heavy
 rain, blizzard — declared once and referenced from any terrain that can have
-it. It carries the effects it declares, and two optional strings the consumer
+it. It carries the effects it declares, and two optional messages the consumer
 may render.
 
 **Declaring nothing is normal.** A weather only declares the keys it wants
@@ -11,16 +11,19 @@ different from the default; silence leaves the default's answer standing, so
 the mild end of a spectrum is an empty declaration rather than a list of
 no-ops.
 
-The library never renders either string, never decides when they are shown and
-never compares them. What a weather's values mean, and when its text appears,
-are the consumer's.
+The library never renders either message, never decides when it is shown and
+never compares them. Each is a string, or a mapping for a game that varies a
+message by who is receiving it — keyed however that game keys it, because the
+keys are as opaque as the text. What a weather's values mean, and when its text
+appears, are the consumer's.
 
 See docs/test-plan.md § WT.
 """
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from evennia_environment.config import BAND_FLOOR, BANDS, SEASON_SHIFT
 from evennia_environment.effects import one_effect_per_type
@@ -75,12 +78,18 @@ class WeatherType:
     disagree with what is filed under it. Held as a tuple whatever was passed,
     because effects resolve at read time and a mutable collection here would
     change every room using this weather.
+
+    ``description`` and ``transition_in`` are each a string, or a mapping for a
+    consumer whose game varies the message by who receives it — see § WT. A
+    mapping is stored and handed back whole: nothing here merges one, compares
+    one or looks inside one, so a weather's message replaces a terrain's exactly
+    as a string does.
     """
 
     key: str
     effects: tuple = ()
-    description: Optional[str] = None
-    transition_in: Optional[str] = None
+    description: Union[str, Mapping, None] = None
+    transition_in: Union[str, Mapping, None] = None
 
     def __post_init__(self):
         """Refuse a declaration that cannot be used, naming the key.
@@ -111,8 +120,11 @@ class WeatherType:
             one_effect_per_type(self.effects, f"Weather {self.key!r}"),
         )
 
-        # The strings are opaque and optional: all that is checked is that
-        # there is text to render, or None saying there is not.
+        # The messages are opaque and optional: all that is checked is that
+        # there is something to render, or None saying there is not. A mapping
+        # passes because a consumer may vary a message by who receives it, and
+        # an empty one is their declaration rather than an absence — `None`
+        # already says that.
         for name, value in (
             ("description", self.description),
             ("transition_in", self.transition_in),
@@ -120,11 +132,12 @@ class WeatherType:
             if value is None:
                 continue
 
-            if not isinstance(value, str):
+            if not isinstance(value, (str, Mapping)):
                 refuse(
                     f"Weather {self.key!r} declares {name} as a "
-                    f"{type(value).__name__}. It is text the consumer renders, "
-                    f"so it has to be a string, or None for none at all."
+                    f"{type(value).__name__}. It is what the consumer renders, "
+                    f"so it has to be a string, a mapping of them, or None for "
+                    f"none at all."
                 )
 
 

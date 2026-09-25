@@ -877,6 +877,35 @@ class WeatherTypeStringTests(TestCase):
         with self.assertRaises(ValueError):
             WeatherType(key="blizzard", transition_in=42)
 
+    def test_wt_13_accepts_a_description_declared_as_a_mapping(self):
+        """WT-13"""
+        # Keyed however the consumer keys it. The library stores the mapping and
+        # never looks inside, so what the keys mean is not its business.
+        lines = {"seen": BLIZZARD_DESCRIPTION, "heard": "Wind howls past."}
+        weather = WeatherType(key="blizzard", description=lines)
+
+        self.assertEqual(weather.description, lines)
+
+    def test_wt_14_accepts_a_transition_in_declared_as_a_mapping(self):
+        """WT-14"""
+        # Two cases rather than one: both fields are checked in the same loop,
+        # and a widening applied to the first alone passes WT-13 and refuses a
+        # consumer who varies the arrival message the same way.
+        lines = {"seen": BLIZZARD_TRANSITION, "heard": "The wind rises."}
+        weather = WeatherType(key="blizzard", transition_in=lines)
+
+        self.assertEqual(weather.transition_in, lines)
+
+    def test_wt_15_accepts_an_empty_mapping(self):
+        """WT-15"""
+        # `None` says there is nothing to render; an empty mapping says the
+        # consumer declared one and has not filled it. Both are falsy, and
+        # telling them apart is theirs rather than ours to refuse on.
+        weather = WeatherType(key="blizzard", description={}, transition_in={})
+
+        self.assertEqual(weather.description, {})
+        self.assertEqual(weather.transition_in, {})
+
 
 class WeatherTypeRefusalTests(TestCase):
     """WT-10. Every refusal is one exception class, and it names the key."""

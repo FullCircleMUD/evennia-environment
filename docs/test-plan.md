@@ -255,8 +255,8 @@ consumer lands back on a whole number.
 ## WT — `WeatherType(key, effects, description, transition_in)`
 
 A frozen dataclass, and the only thing a consumer constructs to declare one weather. It carries the
-name the library looks it up by, the effects it declares, and two optional strings the consumer may
-render.
+name the library looks it up by, the effects it declares, and two optional messages the consumer
+may render.
 
 ```python
 WeatherType(
@@ -290,11 +290,21 @@ is now a thing that cannot be written.
 **A query runs at most one of them.** The call names a key, so only the entry whose type matches is
 consulted. A weather declaring five effects does not run five helpers.
 
-**The two strings are opaque.** The library stores them and hands them back; it never renders them,
+**The two messages are opaque.** The library stores them and hands them back; it never renders them,
 never decides when they are shown and never compares them. `description` is the weather line a
 consumer puts under a room description. `transition_in` is what they render when this weather becomes
 active — one per weather rather than a message per from-to pair, because an incoming message reads
 correctly from any predecessor, and N strings beat N².
+
+**Either may be a string or a mapping.** A consumer whose game varies a message by who is receiving
+it declares a mapping instead of one string — keyed however that game keys it, because the keys are as
+opaque as the text. All that is checked is that there is something to render, or `None` saying there
+is not: a string is one message, a mapping is several, and which of the several applies is a question
+the library has no way to ask and no business asking.
+
+**A mapping is not merged, compared or resolved.** A weather's message replaces a terrain's exactly as
+a string does, and nothing looks inside either. A consumer wanting a mapping that inherits the
+combinations it does not declare is asking for something this does not do.
 
 **Nothing constrains the key beyond being a non-empty string.** Spaces and punctuation are legal, as
 they are for an effect key — the key is a mapping handle, and a player sees `description` and
@@ -327,9 +337,20 @@ they are for an effect key — the key is a mapping handle, and a player sees `d
 
 | ID | Case | Test function |
 |---|---|---|
-| WT-07 | Both strings default to `None` when the consumer declares neither | `test_wt_07_both_strings_default_to_none` |
-| WT-08 | A description that is not a string is refused | `test_wt_08_refuses_a_description_that_is_not_a_string` |
-| WT-09 | A transition_in that is not a string is refused | `test_wt_09_refuses_a_transition_in_that_is_not_a_string` |
+| WT-07 | Both messages default to `None` when the consumer declares neither | `test_wt_07_both_strings_default_to_none` |
+| WT-08 | A description that is neither a string nor a mapping is refused | `test_wt_08_refuses_a_description_that_is_not_a_string` |
+| WT-09 | A transition_in that is neither a string nor a mapping is refused | `test_wt_09_refuses_a_transition_in_that_is_not_a_string` |
+| WT-13 | A description declared as a mapping is accepted and handed back unchanged | `test_wt_13_accepts_a_description_declared_as_a_mapping` |
+| WT-14 | A transition_in declared as a mapping is accepted and handed back unchanged | `test_wt_14_accepts_a_transition_in_declared_as_a_mapping` |
+| WT-15 | An empty mapping is accepted — it is a consumer's declaration, not an absence | `test_wt_15_accepts_an_empty_mapping` |
+
+WT-13 and WT-14 are what the widening is for, and they are two cases rather than one because the two
+fields are checked in one loop: a widening applied to the first alone would pass WT-13 and refuse a
+consumer who varied the arrival message the same way.
+
+WT-15 is the boundary the `None` check already draws. `None` says there is nothing to render and an
+empty mapping says the consumer declared a mapping with nothing in it yet — both are falsy, and
+telling them apart is the consumer's business rather than something to refuse on their behalf.
 
 ### The refusal
 
